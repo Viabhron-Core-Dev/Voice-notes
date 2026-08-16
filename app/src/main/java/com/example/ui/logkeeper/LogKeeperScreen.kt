@@ -258,7 +258,11 @@ fun LogKeeperScreen(
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(filteredLogs, key = { it.id }) { log ->
+                    items(
+                        items = filteredLogs,
+                        key = { it.id },
+                        contentType = { "log_card" }
+                    ) { log ->
                         LogCardItem(log = log)
                     }
                 }

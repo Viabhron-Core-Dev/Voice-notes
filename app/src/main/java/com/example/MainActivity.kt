@@ -19,13 +19,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.example.data.logkeeper.LogKeeperManager
 import com.example.data.logkeeper.LogTag
+import com.example.data.model.NoteColor
+import com.example.ui.editor.NoteEditorScreen
 import com.example.ui.logkeeper.LogKeeperScreen
 import com.example.ui.main.MainShellScreen
 import com.example.ui.theme.MyApplicationTheme
 
-enum class Screen {
-    MAIN,
-    LOG_KEEPER
+sealed interface AppScreen {
+    data object Main : AppScreen
+    data object LogKeeper : AppScreen
+    data class Editor(
+        val noteId: Long? = null,
+        val initialColor: NoteColor = NoteColor.YELLOW,
+        val isChecklist: Boolean = false
+    ) : AppScreen
 }
 
 class MainActivity : ComponentActivity() {
@@ -44,11 +51,11 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppNavigationRoot() {
-    var currentScreen by remember { mutableStateOf(Screen.MAIN) }
+    var currentScreen by remember { mutableStateOf<AppScreen>(AppScreen.Main) }
 
-    BackHandler(enabled = currentScreen != Screen.MAIN) {
+    BackHandler(enabled = currentScreen !is AppScreen.Main) {
         LogKeeperManager.log(LogTag.Navigation, "Back pressed: returned to main")
-        currentScreen = Screen.MAIN
+        currentScreen = AppScreen.Main
     }
 
     AnimatedContent(
@@ -59,18 +66,32 @@ fun AppNavigationRoot() {
         label = "screen_transition"
     ) { screen ->
         when (screen) {
-            Screen.MAIN -> {
+            is AppScreen.Main -> {
                 MainShellScreen(
                     onOpenLogKeeper = {
-                        currentScreen = Screen.LOG_KEEPER
+                        currentScreen = AppScreen.LogKeeper
+                    },
+                    onOpenNoteEditor = { noteId, color, isChecklist ->
+                        currentScreen = AppScreen.Editor(noteId, color, isChecklist)
                     }
                 )
             }
-            Screen.LOG_KEEPER -> {
+            is AppScreen.LogKeeper -> {
                 LogKeeperScreen(
                     onNavigateBack = {
                         LogKeeperManager.log(LogTag.Navigation, "Navigated back from LogKeeper to main")
-                        currentScreen = Screen.MAIN
+                        currentScreen = AppScreen.Main
+                    }
+                )
+            }
+            is AppScreen.Editor -> {
+                NoteEditorScreen(
+                    noteId = screen.noteId,
+                    initialColor = screen.initialColor,
+                    initialChecklist = screen.isChecklist,
+                    onNavigateBack = {
+                        LogKeeperManager.log(LogTag.Navigation, "Navigated back from Editor to main")
+                        currentScreen = AppScreen.Main
                     }
                 )
             }

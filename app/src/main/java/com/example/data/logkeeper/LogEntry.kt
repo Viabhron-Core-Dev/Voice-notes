@@ -1,5 +1,7 @@
 package com.example.data.logkeeper
 
+import androidx.compose.runtime.Immutable
+
 enum class LogTag(val displayName: String) {
     System("System"),
     Navigation("Navigation"),
@@ -17,6 +19,7 @@ enum class LogLevel {
     ERROR
 }
 
+@Immutable
 data class LogEntry(
     val id: Long,
     val timestamp: Long,

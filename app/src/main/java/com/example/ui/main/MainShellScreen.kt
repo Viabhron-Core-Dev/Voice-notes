@@ -1,9 +1,14 @@
 package com.example.ui.main
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -17,34 +22,48 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Notes
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Notes
-import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -60,135 +79,177 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.db.NoteEntity
 import com.example.data.logkeeper.LogKeeperManager
 import com.example.data.logkeeper.LogTag
-import com.example.ui.theme.NoteBlue
-import com.example.ui.theme.NoteBlueStripe
-import com.example.ui.theme.NoteGreen
-import com.example.ui.theme.NoteGreenStripe
-import com.example.ui.theme.NotePeach
-import com.example.ui.theme.NotePeachStripe
-import com.example.ui.theme.NotePink
-import com.example.ui.theme.NotePinkStripe
-import com.example.ui.theme.NoteYellow
-import com.example.ui.theme.NoteYellowStripe
+import com.example.data.model.NoteColor
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainShellScreen(
     onOpenLogKeeper: () -> Unit,
-    modifier: Modifier = Modifier
+    onOpenNoteEditor: (noteId: Long?, initialColor: NoteColor, isChecklist: Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: NotesViewModel = viewModel()
 ) {
+    val notes by viewModel.notes.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val selectedColorFilter by viewModel.selectedColorFilter.collectAsStateWithLifecycle()
+    val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
+
     var selectedTab by remember { mutableIntStateOf(0) }
     var menuExpanded by remember { mutableStateOf(false) }
+    var isSearchActive by remember { mutableStateOf(false) }
+    var showAddTypeDialog by remember { mutableStateOf(false) }
+    var noteToEditColor by remember { mutableStateOf<NoteEntity?>(null) }
 
     Scaffold(
         modifier = modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing),
         topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Color",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Light,
-                                fontSize = 24.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+            if (isSearchActive) {
+                TopAppBar(
+                    title = {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { viewModel.onSearchQueryChanged(it) },
+                            placeholder = { Text("Search title or content...") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("search_text_input")
                         )
-                        Text(
-                            text = "Note",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 24.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = {
-                            LogKeeperManager.log(LogTag.UI_Editor, "Search button clicked")
-                        },
-                        modifier = Modifier.testTag("main_search_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search Notes"
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            LogKeeperManager.log(LogTag.UI_Editor, "View mode toggled")
-                        },
-                        modifier = Modifier.testTag("main_view_toggle")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.GridView,
-                            contentDescription = "Toggle Grid or List View"
-                        )
-                    }
-
-                    Box {
+                    },
+                    navigationIcon = {
                         IconButton(
-                            onClick = { menuExpanded = true },
-                            modifier = Modifier.testTag("main_overflow_menu_button")
+                            onClick = {
+                                isSearchActive = false
+                                viewModel.onSearchQueryChanged("")
+                            }
+                        ) {
+                            Icon(Icons.Default.Clear, contentDescription = "Close Search")
+                        }
+                    },
+                    actions = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { viewModel.onSearchQueryChanged("") }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                )
+            } else {
+                TopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Color",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Light,
+                                    fontSize = 24.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            )
+                            Text(
+                                text = "Note",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 24.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = {
+                                isSearchActive = true
+                                LogKeeperManager.log(LogTag.UI_Editor, "Search mode opened")
+                            },
+                            modifier = Modifier.testTag("main_search_button")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.MoreVert,
-                                contentDescription = "More Options"
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search Notes"
                             )
                         }
 
-                        DropdownMenu(
-                            expanded = menuExpanded,
-                            onDismissRequest = { menuExpanded = false }
+                        IconButton(
+                            onClick = {
+                                viewModel.cycleSortOrder()
+                            },
+                            modifier = Modifier.testTag("main_view_toggle")
                         ) {
-                            DropdownMenuItem(
-                                text = { Text("Log Keeper") },
-                                leadingIcon = {
-                                    Icon(Icons.Default.ReceiptLong, contentDescription = null)
-                                },
-                                onClick = {
-                                    menuExpanded = false
-                                    LogKeeperManager.log(LogTag.Navigation, "Opened LogKeeper via top menu")
-                                    onOpenLogKeeper()
-                                },
-                                modifier = Modifier.testTag("menu_item_logkeeper")
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Import Whisper Model") },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Tune, contentDescription = null)
-                                },
-                                onClick = {
-                                    menuExpanded = false
-                                    LogKeeperManager.log(LogTag.Navigation, "Opened Model Manager (Mini-Phase 6 ready)")
-                                },
-                                modifier = Modifier.testTag("menu_item_import_model")
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Backup & Restore") },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Security, contentDescription = null)
-                                },
-                                onClick = {
-                                    menuExpanded = false
-                                    LogKeeperManager.log(LogTag.Navigation, "Opened Backup & Restore (Mini-Phase 9 ready)")
-                                },
-                                modifier = Modifier.testTag("menu_item_backup")
+                            Icon(
+                                imageVector = Icons.Default.GridView,
+                                contentDescription = "Toggle Grid or Sort View"
                             )
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+
+                        Box {
+                            IconButton(
+                                onClick = { menuExpanded = true },
+                                modifier = Modifier.testTag("main_overflow_menu_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "More Options"
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Log Keeper") },
+                                    leadingIcon = {
+                                        Icon(Icons.AutoMirrored.Filled.ReceiptLong, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        LogKeeperManager.log(LogTag.Navigation, "Opened LogKeeper via top menu")
+                                        onOpenLogKeeper()
+                                    },
+                                    modifier = Modifier.testTag("menu_item_logkeeper")
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Import Whisper Model") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Tune, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        LogKeeperManager.log(LogTag.Navigation, "Opened Model Manager (Mini-Phase 6 ready)")
+                                    },
+                                    modifier = Modifier.testTag("menu_item_import_model")
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Backup & Restore") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Security, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        LogKeeperManager.log(LogTag.Navigation, "Opened Backup & Restore (Mini-Phase 9 ready)")
+                                    },
+                                    modifier = Modifier.testTag("menu_item_backup")
+                                )
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
                 )
-            )
+            }
         },
         bottomBar = {
             NavigationBar(
@@ -203,7 +264,7 @@ fun MainShellScreen(
                         selectedTab = 0
                         LogKeeperManager.log(LogTag.Navigation, "Switched tab: Notes List")
                     },
-                    icon = { Icon(Icons.Default.Notes, contentDescription = "Notes") },
+                    icon = { Icon(Icons.AutoMirrored.Filled.Notes, contentDescription = "Notes") },
                     label = { Text("Notes") },
                     modifier = Modifier.testTag("bottom_tab_notes")
                 )
@@ -258,7 +319,7 @@ fun MainShellScreen(
                         .testTag("fab_open_logkeeper")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.ReceiptLong,
+                        imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
                         contentDescription = "Open Log Keeper Console",
                         modifier = Modifier.size(22.dp)
                     )
@@ -267,7 +328,8 @@ fun MainShellScreen(
                 // Primary Add Note FAB
                 FloatingActionButton(
                     onClick = {
-                        LogKeeperManager.log(LogTag.UI_Editor, "Create note triggered (Ready for Mini-Phase 5)")
+                        LogKeeperManager.log(LogTag.UI_Editor, "Create note type selector opened")
+                        showAddTypeDialog = true
                     },
                     shape = CircleShape,
                     containerColor = Color(0xFF00897B),
@@ -292,32 +354,76 @@ fun MainShellScreen(
                 .background(MaterialTheme.colorScheme.background),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Sort Header Bar
-            item {
-                Surface(
-                    color = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.fillMaxWidth()
+            // Sort & Filter Header Bar
+            item(key = "header_sort", contentType = "header") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clickable { viewModel.cycleSortOrder() }
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Sort by color ▼",
+                            text = "${sortOrder.displayName} ▼",
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                             )
                         )
                     }
+
+                    // Color Filter Horizontal Selector
+                    LazyRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(bottom = 6.dp)
+                    ) {
+                        item(key = "color_all") {
+                            FilterChip(
+                                selected = selectedColorFilter == null,
+                                onClick = { viewModel.onColorFilterSelected(null) },
+                                label = { Text("All (${notes.size})") },
+                                colors = FilterChipDefaults.filterChipColors()
+                            )
+                        }
+
+                        items(NoteColor.entries.toTypedArray(), key = { it.name }) { color ->
+                            FilterChip(
+                                selected = selectedColorFilter == color,
+                                onClick = {
+                                    if (selectedColorFilter == color) {
+                                        viewModel.onColorFilterSelected(null)
+                                    } else {
+                                        viewModel.onColorFilterSelected(color)
+                                    }
+                                },
+                                label = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .background(color.stripeColor, CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(color.displayName)
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
             }
 
-            // Milestone Banner: Mini-Phase 1 Ready Check
-            item {
+            // Milestone Banner: Mini-Phase 2.2 Active
+            item(key = "header_milestone", contentType = "banner") {
                 Card(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(
@@ -340,13 +446,13 @@ fun MainShellScreen(
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "Mini-Phase 1: Shell & LogKeeper Active",
+                                text = "Mini-Phase 2.2: Note & Checklist Editor Live",
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                             )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "• System insets are fully active (Status bar & Navigation bar safe)\n• LogKeeper is live and listening across all components\n• Tap the dark button on bottom-right to open LogKeeper",
+                            text = "• Tap any note card to open the interactive ColorNote Editor\n• Full Text Note & Checklist Todo Modes with live strikethrough\n• Dynamic pastel color tinting and auto-save on back navigation",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
                                 lineHeight = 18.sp
@@ -356,89 +462,223 @@ fun MainShellScreen(
                 }
             }
 
-            // Sample ColorNote Cards
-            item {
-                SampleColorNoteCard(
-                    title = "To do",
-                    time = "3:11 pm",
-                    bgColor = NotePink,
-                    stripeColor = NotePinkStripe,
-                    hasCheckmark = true
-                )
-            }
-            item {
-                SampleColorNoteCard(
-                    title = "Record of things bought",
-                    time = "14 Aug",
-                    bgColor = NotePink,
-                    stripeColor = NotePinkStripe
-                )
-            }
-            item {
-                SampleColorNoteCard(
-                    title = "Good prompts",
-                    time = "12:49 pm",
-                    bgColor = NotePeach,
-                    stripeColor = NotePeachStripe,
-                    hasCheckmark = true
-                )
-            }
-            item {
-                SampleColorNoteCard(
-                    title = "Omnivian",
-                    time = "4:39 pm",
-                    bgColor = NoteYellow,
-                    stripeColor = NoteYellowStripe
-                )
-            }
-            item {
-                SampleColorNoteCard(
-                    title = "A web novel ai writer.\nThis is not written by...",
-                    time = "15 Aug",
-                    bgColor = NoteYellow,
-                    stripeColor = NoteYellowStripe
-                )
-            }
-            item {
-                SampleColorNoteCard(
-                    title = "Voice Notes offline engine",
-                    time = "Just now",
-                    bgColor = NoteBlue,
-                    stripeColor = NoteBlueStripe
-                )
-            }
-            item {
-                SampleColorNoteCard(
-                    title = "Meeting agenda - Board",
-                    time = "Today",
-                    bgColor = NoteGreen,
-                    stripeColor = NoteGreenStripe
+            // Live Room Database Note Cards
+            items(
+                items = notes,
+                key = { it.id },
+                contentType = { "note_card" }
+            ) { note ->
+                val noteColor = remember(note.colorTheme) { NoteColor.fromName(note.colorTheme) }
+                val formattedTime = remember(note.updatedAt) {
+                    val date = Date(note.updatedAt)
+                    val now = System.currentTimeMillis()
+                    if (now - note.updatedAt < 86400000) {
+                        SimpleDateFormat("h:mm a", Locale.getDefault()).format(date)
+                    } else {
+                        SimpleDateFormat("d MMM", Locale.getDefault()).format(date)
+                    }
+                }
+
+                ColorNoteCardItem(
+                    note = note,
+                    noteColor = noteColor,
+                    formattedTime = formattedTime,
+                    onClick = {
+                        onOpenNoteEditor(note.id, noteColor, note.isChecklist)
+                    },
+                    onTogglePin = { viewModel.togglePin(note) },
+                    onDelete = { viewModel.deleteNote(note) },
+                    onChangeColor = { noteToEditColor = note }
                 )
             }
 
-            item {
+            item(key = "footer_spacer", contentType = "spacer") {
                 Spacer(modifier = Modifier.height(30.dp))
             }
         }
     }
+
+    // Add Note Type Selector Dialog (Text Note vs Checklist Note + Color)
+    if (showAddTypeDialog) {
+        var selectedColor by remember { mutableStateOf(NoteColor.YELLOW) }
+
+        AlertDialog(
+            onDismissRequest = { showAddTypeDialog = false },
+            title = { Text("Add Note") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(
+                        text = "Choose Note Type:",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Text Note Choice
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = selectedColor.bgColor),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    showAddTypeDialog = false
+                                    onOpenNoteEditor(null, selectedColor, false)
+                                }
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(16.dp)
+                                    .fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Description,
+                                    contentDescription = null,
+                                    tint = selectedColor.stripeColor,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Text",
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1E293B)
+                                )
+                            }
+                        }
+
+                        // Checklist Note Choice
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = selectedColor.bgColor),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    showAddTypeDialog = false
+                                    onOpenNoteEditor(null, selectedColor, true)
+                                }
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(16.dp)
+                                    .fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Checklist,
+                                    contentDescription = null,
+                                    tint = selectedColor.stripeColor,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Checklist",
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1E293B)
+                                )
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "Card Color:",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        NoteColor.entries.forEach { color ->
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(color.bgColor, CircleShape)
+                                    .clickable { selectedColor = color }
+                                    .padding(4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (selectedColor == color) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = color.stripeColor,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showAddTypeDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Color Picker Dialog
+    noteToEditColor?.let { note ->
+        AlertDialog(
+            onDismissRequest = { noteToEditColor = null },
+            title = { Text("Change Note Color") },
+            text = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    NoteColor.entries.forEach { color ->
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(color.bgColor, CircleShape)
+                                .clickable {
+                                    viewModel.updateNoteColor(note, color)
+                                    noteToEditColor = null
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .background(color.stripeColor, CircleShape)
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { noteToEditColor = null }) {
+                    Text("Done")
+                }
+            }
+        )
+    }
 }
 
 @Composable
-fun SampleColorNoteCard(
-    title: String,
-    time: String,
-    bgColor: Color,
-    stripeColor: Color,
-    hasCheckmark: Boolean = false,
+fun ColorNoteCardItem(
+    note: NoteEntity,
+    noteColor: NoteColor,
+    formattedTime: String,
+    onClick: () -> Unit,
+    onTogglePin: () -> Unit,
+    onDelete: () -> Unit,
+    onChangeColor: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
         shape = RoundedCornerShape(4.dp),
-        colors = CardDefaults.cardColors(containerColor = bgColor),
+        colors = CardDefaults.cardColors(containerColor = noteColor.bgColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 2.dp)
+            .clickable { onClick() }
     ) {
         Row(
             modifier = Modifier
@@ -446,34 +686,59 @@ fun SampleColorNoteCard(
                 .height(60.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left Colored Accent Stripe
+            // Left Colored Accent Stripe (Tap to change color)
             Box(
                 modifier = Modifier
                     .width(6.dp)
                     .fillMaxSize()
-                    .background(stripeColor)
+                    .background(noteColor.stripeColor)
+                    .clickable { onChangeColor() }
             )
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Title
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp,
-                    color = Color(0xFF1E293B)
-                ),
-                maxLines = 2,
-                modifier = Modifier.weight(1f)
-            )
+            // Title and Content preview
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = note.title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        color = Color(0xFF1E293B)
+                    ),
+                    maxLines = 1
+                )
+                if (note.content.isNotBlank()) {
+                    Text(
+                        text = note.content.replace("[x] ", "✓ ").replace("[ ] ", "• "),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = Color(0xFF475569),
+                            fontSize = 12.sp
+                        ),
+                        maxLines = 1
+                    )
+                }
+            }
+
+            // Pin Button
+            IconButton(
+                onClick = onTogglePin,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                    contentDescription = if (note.isPinned) "Unpin Note" else "Pin Note",
+                    tint = if (note.isPinned) noteColor.stripeColor else Color(0xFF64748B),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
 
             // Right Metadata: Checkmark + Timestamp
             Row(
-                modifier = Modifier.padding(end = 14.dp),
+                modifier = Modifier.padding(end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (hasCheckmark) {
+                if (note.isChecklist) {
                     Text(
                         text = "✓ ",
                         color = Color(0xFF334155),
@@ -482,11 +747,24 @@ fun SampleColorNoteCard(
                     )
                 }
                 Text(
-                    text = time,
+                    text = formattedTime,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = Color(0xFF334155),
                         fontSize = 13.sp
                     )
+                )
+            }
+
+            // Quick Delete Button
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete Note",
+                    tint = Color(0xFF94A3B8),
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
