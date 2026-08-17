@@ -95,6 +95,7 @@ import java.util.Locale
 fun MainShellScreen(
     onOpenLogKeeper: () -> Unit,
     onOpenNoteEditor: (noteId: Long?, initialColor: NoteColor) -> Unit,
+    onOpenModelManager: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: NotesViewModel = viewModel()
 ) {
@@ -246,7 +247,8 @@ fun MainShellScreen(
                                     },
                                     onClick = {
                                         menuExpanded = false
-                                        LogKeeperManager.log(LogTag.Navigation, "Opened Model Manager (Mini-Phase 6 ready)")
+                                        LogKeeperManager.log(LogTag.Navigation, "Opened Model Manager via top menu")
+                                        onOpenModelManager()
                                     },
                                     modifier = Modifier.testTag("menu_item_import_model")
                                 )

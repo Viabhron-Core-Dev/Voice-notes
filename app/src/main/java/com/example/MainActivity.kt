@@ -23,11 +23,13 @@ import com.example.data.model.NoteColor
 import com.example.ui.editor.NoteEditorScreen
 import com.example.ui.logkeeper.LogKeeperScreen
 import com.example.ui.main.MainShellScreen
+import com.example.ui.models.ModelManagerScreen
 import com.example.ui.theme.MyApplicationTheme
 
 sealed interface AppScreen {
     data object Main : AppScreen
     data object LogKeeper : AppScreen
+    data object ModelManager : AppScreen
     data class Editor(
         val noteId: Long? = null,
         val initialColor: NoteColor = NoteColor.YELLOW
@@ -72,6 +74,17 @@ fun AppNavigationRoot() {
                     },
                     onOpenNoteEditor = { noteId, color ->
                         currentScreen = AppScreen.Editor(noteId, color)
+                    },
+                    onOpenModelManager = {
+                        currentScreen = AppScreen.ModelManager
+                    }
+                )
+            }
+            is AppScreen.ModelManager -> {
+                ModelManagerScreen(
+                    onNavigateBack = {
+                        LogKeeperManager.log(LogTag.Navigation, "Navigated back from ModelManager to main")
+                        currentScreen = AppScreen.Main
                     }
                 )
             }

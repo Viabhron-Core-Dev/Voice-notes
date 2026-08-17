@@ -51,9 +51,13 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -319,15 +323,43 @@ fun TextEditorView(
     onContentChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val lineColor = Color(0xFF000000).copy(alpha = 0.05f)
+    val density = LocalDensity.current
+    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+    val fontSize = 17.sp
+    val lineHeight = 36.sp
+    val lineHeightPx = with(density) { lineHeight.toPx() }
+    val topPaddingDp = 12.dp
+    val topPaddingPx = with(density) { topPaddingDp.toPx() }
+    val horizontalPaddingDp = 18.dp
+
+    // Subtle notebook lined paper color
+    val lineColor = Color(0xFF000000).copy(alpha = 0.08f)
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .drawBehind {
-                // Subtle notebook lined paper background
-                val lineHeight = 32.dp.toPx()
-                var y = lineHeight
+                val layout = textLayoutResult
+                var lastLineY = topPaddingPx
+
+                if (layout != null && content.isNotEmpty()) {
+                    val lineCount = layout.lineCount
+                    for (i in 0 until lineCount) {
+                        // Position ruled line right beneath the text baseline so characters sit on top
+                        val baselineY = topPaddingPx + layout.getLineBaseline(i) + 4.dp.toPx()
+                        drawLine(
+                            color = lineColor,
+                            start = Offset(0f, baselineY),
+                            end = Offset(size.width, baselineY),
+                            strokeWidth = 1.dp.toPx()
+                        )
+                        lastLineY = baselineY
+                    }
+                }
+
+                // Continue drawing empty notebook lines down to the bottom of the screen
+                var y = if (lastLineY > topPaddingPx) lastLineY + lineHeightPx else topPaddingPx + lineHeightPx
                 while (y < size.height) {
                     drawLine(
                         color = lineColor,
@@ -335,18 +367,28 @@ fun TextEditorView(
                         end = Offset(size.width, y),
                         strokeWidth = 1.dp.toPx()
                     )
-                    y += lineHeight
+                    y += lineHeightPx
                 }
             }
-            .padding(horizontal = 18.dp, vertical = 12.dp)
+            .padding(horizontal = horizontalPaddingDp, vertical = topPaddingDp)
     ) {
         BasicTextField(
             value = content,
             onValueChange = onContentChange,
+            onTextLayout = { layoutResult ->
+                textLayoutResult = layoutResult
+            },
             textStyle = TextStyle(
-                fontSize = 17.sp,
-                lineHeight = 32.sp,
-                color = Color(0xFF1E293B)
+                fontSize = fontSize,
+                lineHeight = lineHeight,
+                color = Color(0xFF1E293B),
+                platformStyle = PlatformTextStyle(
+                    includeFontPadding = false
+                ),
+                lineHeightStyle = LineHeightStyle(
+                    alignment = LineHeightStyle.Alignment.Center,
+                    trim = LineHeightStyle.Trim.None
+                )
             ),
             cursorBrush = SolidColor(stripeColor),
             decorationBox = { innerTextField ->
@@ -355,9 +397,16 @@ fun TextEditorView(
                         Text(
                             text = "Tap here to start writing your note...",
                             style = TextStyle(
-                                fontSize = 17.sp,
-                                lineHeight = 32.sp,
-                                color = Color(0xFF64748B).copy(alpha = 0.6f)
+                                fontSize = fontSize,
+                                lineHeight = lineHeight,
+                                color = Color(0xFF64748B).copy(alpha = 0.6f),
+                                platformStyle = PlatformTextStyle(
+                                    includeFontPadding = false
+                                ),
+                                lineHeightStyle = LineHeightStyle(
+                                    alignment = LineHeightStyle.Alignment.Center,
+                                    trim = LineHeightStyle.Trim.None
+                                )
                             )
                         )
                     }

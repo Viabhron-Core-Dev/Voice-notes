@@ -13,12 +13,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 @Database(
-    entities = [NoteEntity::class],
-    version = 1,
+    entities = [NoteEntity::class, ModelInfoEntity::class],
+    version = 2,
     exportSchema = false
 )
 abstract class VoiceNotesDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
+    abstract fun modelDao(): ModelDao
 
     companion object {
         @Volatile
