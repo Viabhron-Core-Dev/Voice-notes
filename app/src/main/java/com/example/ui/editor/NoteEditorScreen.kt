@@ -1,57 +1,35 @@
 package com.example.ui.editor
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Notes
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Checklist
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -59,8 +37,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -78,13 +54,10 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.data.model.ChecklistItem
 import com.example.data.model.NoteColor
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -97,11 +70,10 @@ fun NoteEditorScreen(
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier,
     initialColor: NoteColor = NoteColor.YELLOW,
-    initialChecklist: Boolean = false,
     viewModel: NoteEditorViewModel = viewModel()
 ) {
     LaunchedEffect(noteId) {
-        viewModel.initialize(noteId, initialColor, initialChecklist)
+        viewModel.initialize(noteId, initialColor)
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -143,7 +115,7 @@ fun NoteEditorScreen(
                             Box {
                                 if (uiState.title.isEmpty()) {
                                     Text(
-                                        text = if (uiState.isChecklist) "Checklist Title..." else "Note Title...",
+                                        text = "Note Title...",
                                         style = TextStyle(
                                             fontSize = 20.sp,
                                             fontWeight = FontWeight.Bold,
@@ -196,18 +168,6 @@ fun NoteEditorScreen(
                             imageVector = Icons.Default.ColorLens,
                             contentDescription = "Change Color",
                             tint = uiState.color.stripeColor
-                        )
-                    }
-
-                    // Checklist Mode Toggle
-                    IconButton(
-                        onClick = { viewModel.toggleChecklistMode() },
-                        modifier = Modifier.testTag("editor_mode_toggle")
-                    ) {
-                        Icon(
-                            imageVector = if (uiState.isChecklist) Icons.AutoMirrored.Filled.Notes else Icons.Default.Checklist,
-                            contentDescription = if (uiState.isChecklist) "Switch to Text Note" else "Switch to Checklist",
-                            tint = Color(0xFF334155)
                         )
                     }
 
@@ -271,20 +231,11 @@ fun NoteEditorScreen(
                 .padding(innerPadding)
                 .background(animatedBgColor)
         ) {
-            if (uiState.isChecklist) {
-                ChecklistEditorView(
-                    uiState = uiState,
-                    onToggleItem = { viewModel.toggleChecklistItem(it) },
-                    onDeleteItem = { viewModel.deleteChecklistItem(it) },
-                    onAddItem = { viewModel.addChecklistItem(it) }
-                )
-            } else {
-                TextEditorView(
-                    content = uiState.content,
-                    stripeColor = uiState.color.stripeColor,
-                    onContentChange = { viewModel.onContentChanged(it) }
-                )
-            }
+            TextEditorView(
+                content = uiState.content,
+                stripeColor = uiState.color.stripeColor,
+                onContentChange = { viewModel.onContentChanged(it) }
+            )
         }
     }
 
@@ -421,196 +372,6 @@ fun TextEditorView(
 }
 
 @Composable
-fun ChecklistEditorView(
-    uiState: NoteEditorUiState,
-    onToggleItem: (String) -> Unit,
-    onDeleteItem: (String) -> Unit,
-    onAddItem: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var newItemText by remember { mutableStateOf("") }
-    val uncheckedItems = remember(uiState.checklistItems) { uiState.checklistItems.filter { !it.isChecked } }
-    val checkedItems = remember(uiState.checklistItems) { uiState.checklistItems.filter { it.isChecked } }
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .imePadding()
-    ) {
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            // Unchecked items
-            items(uncheckedItems, key = { it.id }) { item ->
-                ChecklistRowItem(
-                    item = item,
-                    stripeColor = uiState.color.stripeColor,
-                    onToggle = { onToggleItem(item.id) },
-                    onDelete = { onDeleteItem(item.id) }
-                )
-            }
-
-            // Checked items divider
-            if (checkedItems.isNotEmpty()) {
-                item(key = "checked_divider") {
-                    Column(modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Completed (${checkedItems.size})",
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF64748B)
-                                )
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            HorizontalDivider(
-                                color = Color(0xFF000000).copy(alpha = 0.08f),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
-
-                items(checkedItems, key = { it.id }) { item ->
-                    ChecklistRowItem(
-                        item = item,
-                        stripeColor = uiState.color.stripeColor,
-                        onToggle = { onToggleItem(item.id) },
-                        onDelete = { onDeleteItem(item.id) }
-                    )
-                }
-            }
-        }
-
-        // Persistent Add Item Bottom Bar
-        Surface(
-            color = uiState.color.bgColor,
-            shadowElevation = 4.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextField(
-                    value = newItemText,
-                    onValueChange = { newItemText = it },
-                    placeholder = { Text("Add new checklist item...") },
-                    singleLine = true,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.White.copy(alpha = 0.5f),
-                        unfocusedContainerColor = Color.White.copy(alpha = 0.3f),
-                        focusedIndicatorColor = uiState.color.stripeColor,
-                        unfocusedIndicatorColor = Color.Transparent
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(
-                        onDone = {
-                            if (newItemText.isNotBlank()) {
-                                onAddItem(newItemText)
-                                newItemText = ""
-                            }
-                        }
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("checklist_add_item_input")
-                )
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                IconButton(
-                    onClick = {
-                        if (newItemText.isNotBlank()) {
-                            onAddItem(newItemText)
-                            newItemText = ""
-                        }
-                    },
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(uiState.color.stripeColor, CircleShape)
-                        .testTag("checklist_add_item_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Add Item",
-                        tint = Color.White
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun ChecklistRowItem(
-    item: ChecklistItem,
-    stripeColor: Color,
-    onToggle: () -> Unit,
-    onDelete: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        shape = RoundedCornerShape(6.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (item.isChecked) Color.White.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.65f)
-        ),
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onToggle() }
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Checkbox(
-                checked = item.isChecked,
-                onCheckedChange = { onToggle() },
-                colors = CheckboxDefaults.colors(
-                    checkedColor = stripeColor,
-                    uncheckedColor = Color(0xFF64748B)
-                ),
-                modifier = Modifier.size(36.dp)
-            )
-
-            Spacer(modifier = Modifier.width(6.dp))
-
-            Text(
-                text = item.text,
-                style = TextStyle(
-                    fontSize = 16.sp,
-                    color = if (item.isChecked) Color(0xFF94A3B8) else Color(0xFF1E293B),
-                    textDecoration = if (item.isChecked) TextDecoration.LineThrough else TextDecoration.None
-                ),
-                modifier = Modifier.weight(1f)
-            )
-
-            IconButton(
-                onClick = onDelete,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Delete item",
-                    tint = Color(0xFF94A3B8),
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
 fun EditorBottomBar(
     uiState: NoteEditorUiState,
     backgroundColor: Color,
@@ -621,15 +382,9 @@ fun EditorBottomBar(
         SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(date)
     }
 
-    val statusText = if (uiState.isChecklist) {
-        val total = uiState.checklistItems.size
-        val completed = uiState.checklistItems.count { it.isChecked }
-        "Checklist: $completed/$total completed"
-    } else {
-        val words = if (uiState.content.isBlank()) 0 else uiState.content.trim().split("\\s+".toRegex()).size
-        val chars = uiState.content.length
-        "$chars chars  |  $words words"
-    }
+    val words = if (uiState.content.isBlank()) 0 else uiState.content.trim().split("\\s+".toRegex()).size
+    val chars = uiState.content.length
+    val statusText = "$chars chars  |  $words words"
 
     Surface(
         color = backgroundColor,

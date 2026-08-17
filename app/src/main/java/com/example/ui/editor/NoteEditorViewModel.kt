@@ -7,7 +7,6 @@ import com.example.data.db.NoteEntity
 import com.example.data.db.VoiceNotesDatabase
 import com.example.data.logkeeper.LogKeeperManager
 import com.example.data.logkeeper.LogTag
-import com.example.data.model.ChecklistItem
 import com.example.data.model.NoteColor
 import com.example.data.repository.NotesRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,8 +22,6 @@ data class NoteEditorUiState(
     val content: String = "",
     val color: NoteColor = NoteColor.YELLOW,
     val isPinned: Boolean = false,
-    val isChecklist: Boolean = false,
-    val checklistItems: List<ChecklistItem> = emptyList(),
     val isLoaded: Boolean = false,
     val hasAudio: Boolean = false,
     val audioPath: String? = null,
@@ -42,7 +39,7 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
 
     private var initialNoteState: NoteEntity? = null
 
-    fun initialize(noteId: Long?, initialColor: NoteColor = NoteColor.YELLOW, initialChecklist: Boolean = false) {
+    fun initialize(noteId: Long?, initialColor: NoteColor = NoteColor.YELLOW) {
         if (_uiState.value.isLoaded) return
 
         if (noteId == null || noteId == 0L) {
@@ -54,8 +51,6 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
                     content = "",
                     color = initialColor,
                     isPinned = false,
-                    isChecklist = initialChecklist,
-                    checklistItems = emptyList(),
                     isLoaded = true,
                     updatedAt = System.currentTimeMillis(),
                     isSavedStatus = true
@@ -63,7 +58,7 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
             }
             LogKeeperManager.log(
                 LogTag.UI_Editor,
-                "Initialized New Note Editor (Checklist: $initialChecklist, Color: ${initialColor.displayName})"
+                "Initialized New Note Editor (Color: ${initialColor.displayName})"
             )
         } else {
             // Load Existing Note
@@ -72,11 +67,6 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
                 if (existing != null) {
                     initialNoteState = existing
                     val noteColor = NoteColor.fromName(existing.colorTheme)
-                    val checklistItems = if (existing.isChecklist) {
-                        ChecklistItem.parseFromContent(existing.content)
-                    } else {
-                        emptyList()
-                    }
 
                     _uiState.update {
                         it.copy(
@@ -85,8 +75,6 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
                             content = existing.content,
                             color = noteColor,
                             isPinned = existing.isPinned,
-                            isChecklist = existing.isChecklist,
-                            checklistItems = checklistItems,
                             hasAudio = existing.hasAudio,
                             audioPath = existing.audioPath,
                             audioDurationMs = existing.audioDurationMs,
@@ -123,85 +111,10 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
         LogKeeperManager.log(LogTag.UI_Editor, "Editor note pin toggled to: $nextPin")
     }
 
-    fun toggleChecklistMode() {
-        val current = _uiState.value
-        val nextIsChecklist = !current.isChecklist
-
-        if (nextIsChecklist) {
-            // Convert plain text content to checklist items
-            val parsed = ChecklistItem.parseFromContent(current.content)
-            _uiState.update {
-                it.copy(
-                    isChecklist = true,
-                    checklistItems = parsed,
-                    content = ChecklistItem.serializeToContent(parsed),
-                    isSavedStatus = false
-                )
-            }
-            LogKeeperManager.log(LogTag.UI_Editor, "Converted note to Checklist mode (${parsed.size} items)")
-        } else {
-            // Convert checklist items to plain text
-            val plain = ChecklistItem.toPlainText(current.checklistItems)
-            _uiState.update {
-                it.copy(
-                    isChecklist = false,
-                    content = if (plain.isNotBlank()) plain else current.content,
-                    isSavedStatus = false
-                )
-            }
-            LogKeeperManager.log(LogTag.UI_Editor, "Converted note to Text mode")
-        }
-    }
-
-    fun addChecklistItem(itemText: String) {
-        val clean = itemText.trim()
-        if (clean.isBlank()) return
-
-        val newItem = ChecklistItem(text = clean, isChecked = false)
-        val updatedList = _uiState.value.checklistItems + newItem
-        _uiState.update {
-            it.copy(
-                checklistItems = updatedList,
-                content = ChecklistItem.serializeToContent(updatedList),
-                isSavedStatus = false
-            )
-        }
-        LogKeeperManager.log(LogTag.UI_Editor, "Added checklist item: '$clean'")
-    }
-
-    fun toggleChecklistItem(itemId: String) {
-        val updatedList = _uiState.value.checklistItems.map { item ->
-            if (item.id == itemId) item.copy(isChecked = !item.isChecked) else item
-        }
-        _uiState.update {
-            it.copy(
-                checklistItems = updatedList,
-                content = ChecklistItem.serializeToContent(updatedList),
-                isSavedStatus = false
-            )
-        }
-    }
-
-    fun deleteChecklistItem(itemId: String) {
-        val updatedList = _uiState.value.checklistItems.filterNot { it.id == itemId }
-        _uiState.update {
-            it.copy(
-                checklistItems = updatedList,
-                content = ChecklistItem.serializeToContent(updatedList),
-                isSavedStatus = false
-            )
-        }
-        LogKeeperManager.log(LogTag.UI_Editor, "Deleted checklist item")
-    }
-
     fun saveNote(): Boolean {
         val state = _uiState.value
         val title = state.title.trim()
-        val content = if (state.isChecklist) {
-            ChecklistItem.serializeToContent(state.checklistItems)
-        } else {
-            state.content.trim()
-        }
+        val content = state.content.trim()
 
         // If completely empty and new, do not save an empty ghost record
         if (title.isBlank() && content.isBlank()) {
@@ -215,9 +128,7 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
         }
 
         val effectiveTitle = if (title.isBlank()) {
-            if (state.isChecklist && state.checklistItems.isNotEmpty()) {
-                state.checklistItems.first().text
-            } else if (content.isNotBlank()) {
+            if (content.isNotBlank()) {
                 content.lines().firstOrNull()?.take(30) ?: "Untitled Note"
             } else {
                 "Untitled Note"
@@ -233,7 +144,7 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
             content = content,
             colorTheme = state.color.name,
             isPinned = state.isPinned,
-            isChecklist = state.isChecklist,
+            isChecklist = false,
             isArchived = false,
             hasAudio = state.hasAudio,
             audioPath = state.audioPath,

@@ -30,8 +30,7 @@ sealed interface AppScreen {
     data object LogKeeper : AppScreen
     data class Editor(
         val noteId: Long? = null,
-        val initialColor: NoteColor = NoteColor.YELLOW,
-        val isChecklist: Boolean = false
+        val initialColor: NoteColor = NoteColor.YELLOW
     ) : AppScreen
 }
 
@@ -71,8 +70,8 @@ fun AppNavigationRoot() {
                     onOpenLogKeeper = {
                         currentScreen = AppScreen.LogKeeper
                     },
-                    onOpenNoteEditor = { noteId, color, isChecklist ->
-                        currentScreen = AppScreen.Editor(noteId, color, isChecklist)
+                    onOpenNoteEditor = { noteId, color ->
+                        currentScreen = AppScreen.Editor(noteId, color)
                     }
                 )
             }
@@ -88,7 +87,6 @@ fun AppNavigationRoot() {
                 NoteEditorScreen(
                     noteId = screen.noteId,
                     initialColor = screen.initialColor,
-                    initialChecklist = screen.isChecklist,
                     onNavigateBack = {
                         LogKeeperManager.log(LogTag.Navigation, "Navigated back from Editor to main")
                         currentScreen = AppScreen.Main

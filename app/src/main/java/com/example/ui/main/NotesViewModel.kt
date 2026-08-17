@@ -88,6 +88,18 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
         initialValue = emptyList()
     )
 
+    val archivedNotes: StateFlow<List<NoteEntity>> = repository.archivedNotes.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    val allActiveNotes: StateFlow<List<NoteEntity>> = repository.activeNotes.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
     fun onSearchQueryChanged(query: String) {
         _searchQuery.value = query
         if (query.isNotBlank()) {
@@ -118,15 +130,15 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun deleteNote(note: NoteEntity) {
+    fun toggleArchive(note: NoteEntity) {
         viewModelScope.launch {
-            repository.deleteNote(note)
+            repository.toggleArchive(note.id, note.isArchived)
         }
     }
 
-    fun createQuickNote(title: String, content: String, color: NoteColor, isChecklist: Boolean) {
+    fun deleteNote(note: NoteEntity) {
         viewModelScope.launch {
-            repository.addQuickNote(title, content, color, isChecklist)
+            repository.deleteNote(note)
         }
     }
 

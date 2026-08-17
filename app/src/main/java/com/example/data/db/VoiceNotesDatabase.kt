@@ -60,7 +60,7 @@ abstract class VoiceNotesDatabase : RoomDatabase() {
                     content = "Buy groceries\nReview UI changes\nCheck Log Keeper",
                     colorTheme = NoteColor.PINK.name,
                     isPinned = true,
-                    isChecklist = true,
+                    isChecklist = false,
                     createdAt = System.currentTimeMillis() - 3600000,
                     updatedAt = System.currentTimeMillis() - 3600000
                 ),
@@ -78,7 +78,7 @@ abstract class VoiceNotesDatabase : RoomDatabase() {
                     content = "System instructions for Android voice offline transcriber",
                     colorTheme = NoteColor.PEACH.name,
                     isPinned = true,
-                    isChecklist = true,
+                    isChecklist = false,
                     createdAt = System.currentTimeMillis() - 7200000,
                     updatedAt = System.currentTimeMillis() - 7200000
                 ),
