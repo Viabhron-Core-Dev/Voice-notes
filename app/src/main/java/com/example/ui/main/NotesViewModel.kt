@@ -41,12 +41,6 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
     private val _sortOrder = MutableStateFlow(NoteSortOrder.MODIFIED_DESC)
     val sortOrder: StateFlow<NoteSortOrder> = _sortOrder.asStateFlow()
 
-    init {
-        viewModelScope.launch {
-            repository.ensureStarterNotesIfEmpty()
-        }
-    }
-
     val notes: StateFlow<List<NoteEntity>> = combine(
         _searchQuery,
         _selectedColorFilter,
@@ -99,6 +93,100 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = emptyList()
     )
+
+    val allFolders: StateFlow<List<String>> = repository.getAllFolderNames().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    // Multi-Select State
+    private val _selectedNoteIds = MutableStateFlow<Set<Long>>(emptySet())
+    val selectedNoteIds: StateFlow<Set<Long>> = _selectedNoteIds.asStateFlow()
+
+    fun toggleNoteSelection(noteId: Long) {
+        val current = _selectedNoteIds.value
+        _selectedNoteIds.value = if (current.contains(noteId)) {
+            current - noteId
+        } else {
+            current + noteId
+        }
+    }
+
+    fun selectAll(noteIds: List<Long>) {
+        _selectedNoteIds.value = noteIds.toSet()
+        LogKeeperManager.log(LogTag.UI_Editor, "Multi-select: Selected all ${noteIds.size} notes")
+    }
+
+    fun clearSelection() {
+        _selectedNoteIds.value = emptySet()
+        LogKeeperManager.log(LogTag.UI_Editor, "Multi-select: Selection cleared")
+    }
+
+    fun batchSetColor(color: NoteColor) {
+        val ids = _selectedNoteIds.value.toList()
+        if (ids.isNotEmpty()) {
+            viewModelScope.launch {
+                repository.batchSetColor(ids, color)
+                clearSelection()
+            }
+        }
+    }
+
+    fun batchSetPin(isPinned: Boolean) {
+        val ids = _selectedNoteIds.value.toList()
+        if (ids.isNotEmpty()) {
+            viewModelScope.launch {
+                repository.batchSetPin(ids, isPinned)
+                clearSelection()
+            }
+        }
+    }
+
+    fun batchArchive() {
+        val ids = _selectedNoteIds.value.toList()
+        if (ids.isNotEmpty()) {
+            viewModelScope.launch {
+                repository.batchSetArchive(ids, true)
+                clearSelection()
+            }
+        }
+    }
+
+    fun batchDelete() {
+        val ids = _selectedNoteIds.value.toList()
+        if (ids.isNotEmpty()) {
+            viewModelScope.launch {
+                repository.batchDelete(ids)
+                clearSelection()
+            }
+        }
+    }
+
+    fun batchSetFolder(folderName: String?) {
+        val ids = _selectedNoteIds.value.toList()
+        if (ids.isNotEmpty()) {
+            viewModelScope.launch {
+                repository.batchSetFolder(ids, folderName)
+                clearSelection()
+            }
+        }
+    }
+
+    fun reorderNoteInFolder(id: Long, newIndex: Int) {
+        viewModelScope.launch {
+            repository.updateNoteOrder(id, newIndex)
+        }
+    }
+
+    fun importNotesFromPdf(folderName: String, importedNotes: List<NoteEntity>) {
+        viewModelScope.launch {
+            for (note in importedNotes) {
+                repository.insertNote(note)
+            }
+            LogKeeperManager.log(LogTag.Storage, "Imported ${importedNotes.size} notes into folder '$folderName'")
+        }
+    }
 
     fun onSearchQueryChanged(query: String) {
         _searchQuery.value = query

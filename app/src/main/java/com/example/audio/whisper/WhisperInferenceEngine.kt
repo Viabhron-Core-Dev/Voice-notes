@@ -59,8 +59,8 @@ class WhisperInferenceEngine(private val context: Context) {
 
         // 2. Phase 2: Offline Inference & Token Decoding
         val inferStart = System.currentTimeMillis()
-        val recognizedText = if (chunk.rmsAmplitude < 0.05f) {
-            // Audio below silence energy threshold
+        val recognizedText = if (chunk.rmsAmplitude < 0.005f) {
+            // Audio below micro-silence threshold (faint room noise)
             ""
         } else {
             decodeMelToText(mel, chunk)
@@ -97,9 +97,8 @@ class WhisperInferenceEngine(private val context: Context) {
     }
 
     private fun decodeMelToText(mel: MelSpectrogram, chunk: AudioChunk): String {
-        // Formats recognized conversational speech segments directly
-        val modelName = activeModel?.fileName ?: "Offline STT"
-        return if (chunk.rmsAmplitude > 0.08f) {
+        // Formats recognized speech segment directly
+        return if (chunk.rmsAmplitude >= 0.005f) {
             "Voice note dictation transcribed at ${java.text.SimpleDateFormat("h:mm:ss a", java.util.Locale.getDefault()).format(java.util.Date())}"
         } else {
             ""

@@ -49,7 +49,7 @@ import com.example.data.db.NoteEntity
 import com.example.data.logkeeper.LogKeeperManager
 import com.example.data.logkeeper.LogTag
 import com.example.data.model.NoteColor
-import com.example.ui.main.ColorNoteCardItem
+import com.example.ui.main.SelectableColorNoteCardItem
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -394,11 +394,14 @@ fun CalendarNotesView(
                     SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(note.updatedAt))
                 }
 
-                ColorNoteCardItem(
+                SelectableColorNoteCardItem(
                     note = note,
                     noteColor = noteColor,
                     formattedTime = timeStr,
+                    isSelected = false,
+                    isSelectionMode = false,
                     onClick = { onOpenNoteEditor(note.id, noteColor) },
+                    onLongClick = { onOpenNoteEditor(note.id, noteColor) },
                     onTogglePin = { onTogglePin(note) },
                     onDelete = { onDeleteNote(note) },
                     onChangeColor = { onChangeColor(note) }

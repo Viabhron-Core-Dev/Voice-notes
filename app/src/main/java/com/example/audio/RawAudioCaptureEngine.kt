@@ -93,8 +93,9 @@ class RawAudioCaptureEngine(
         val bufferSize = (minBufferSize * 2).coerceAtLeast(4096)
 
         try {
+            // Prefer standard MIC with software boost for universal compatibility across phone OEMs
             audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                MediaRecorder.AudioSource.MIC,
                 SAMPLE_RATE,
                 CHANNEL_CONFIG,
                 AUDIO_FORMAT,
@@ -102,10 +103,20 @@ class RawAudioCaptureEngine(
             )
 
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                // Fallback to Standard MIC if VOICE_RECOGNITION fails
                 audioRecord?.release()
                 audioRecord = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    SAMPLE_RATE,
+                    CHANNEL_CONFIG,
+                    AUDIO_FORMAT,
+                    bufferSize
+                )
+            }
+
+            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+                audioRecord?.release()
+                audioRecord = AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                     SAMPLE_RATE,
                     CHANNEL_CONFIG,
                     AUDIO_FORMAT,
@@ -119,6 +130,15 @@ class RawAudioCaptureEngine(
                 _captureState.value = AudioCaptureState.Error(err)
                 return false
             }
+
+            // Enable hardware AGC (Automatic Gain Control) if supported on device
+            try {
+                if (android.media.audiofx.AutomaticGainControl.isAvailable()) {
+                    val agc = android.media.audiofx.AutomaticGainControl.create(audioRecord!!.audioSessionId)
+                    agc?.enabled = true
+                    LogKeeperManager.log(LogTag.VoiceEngine, "Hardware AutomaticGainControl (AGC) enabled")
+                }
+            } catch (ignored: Throwable) {}
 
             audioRecord?.startRecording()
             LogKeeperManager.log(
@@ -141,27 +161,29 @@ class RawAudioCaptureEngine(
                     totalChunksEmitted = 0
                 )
 
+                // High-sensitivity Digital Pre-Amp Gain multiplier (3.5x boost for quiet/whisper speech)
+                val DIGITAL_PREAMP_GAIN = 3.5f
+
                 while (isActive && audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     val readCount = audioRecord?.read(shortBuffer, 0, shortBuffer.size) ?: 0
                     if (readCount > 0) {
-                        // Calculate Root Mean Square (RMS) amplitude for real-time UI waveform
+                        // Calculate Root Mean Square (RMS) amplitude with pre-amp gain
                         var sumOfSquares = 0.0
                         for (i in 0 until readCount) {
-                            val sample = shortBuffer[i]
-                            sumOfSquares += (sample * sample).toDouble()
+                            val amplified = (shortBuffer[i] * DIGITAL_PREAMP_GAIN).coerceIn(-32768f, 32767f)
+                            sumOfSquares += (amplified * amplified).toDouble()
                         }
                         val rms = sqrt(sumOfSquares / readCount).toFloat()
 
-                        // Acoustic dB calculation: 20 * log10(rms / 32767)
-                        // Range: -50 dB (quiet room) -> -10 dB (normal speaking voice) -> 0 dB (loud peak)
-                        val db = if (rms > 1.0f) 20.0 * kotlin.math.log10(rms.toDouble() / 32767.0) else -60.0
-                        val normalizedRms = ((db + 50.0) / 40.0).coerceIn(0.0, 1.0).toFloat()
+                        // High sensitivity acoustic dB range: -65 dB (faint whisper) -> -10 dB (speaking)
+                        val db = if (rms > 0.1f) 20.0 * kotlin.math.log10(rms.toDouble() / 32767.0) else -80.0
+                        val normalizedRms = ((db + 65.0) / 55.0).coerceIn(0.0, 1.0).toFloat()
 
                         _currentAmplitude.value = normalizedRms
 
-                        // Convert short samples to normalized Float32 [-1.0f, 1.0f]
+                        // Convert short samples to normalized Float32 [-1.0f, 1.0f] with digital boost
                         for (i in 0 until readCount) {
-                            val floatSample = (shortBuffer[i] / 32768.0f).coerceIn(-1.0f, 1.0f)
+                            val floatSample = ((shortBuffer[i] * DIGITAL_PREAMP_GAIN) / 32768.0f).coerceIn(-1.0f, 1.0f)
                             chunkAccumulator[accumulatedSamples++] = floatSample
 
                             // If we reached chunk size (3.0 seconds / 48,000 samples), emit chunk

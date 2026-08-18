@@ -26,6 +26,13 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+enum class SpeechRecognitionStatus {
+    IDLE_SILENCE,       // Grey - no loud audio or silence
+    HEARING_SOUND,      // Blue - microphone picking up sound/speech
+    WORDS_RECOGNIZED,   // Green - model successfully transcribed words
+    NO_WORDS_DETECTED   // Red / Soft Red - sound detected but no recognizable words
+}
+
 data class NoteEditorUiState(
     val noteId: Long? = null,
     val title: String = "",
@@ -37,7 +44,9 @@ data class NoteEditorUiState(
     val audioPath: String? = null,
     val audioDurationMs: Long = 0L,
     val updatedAt: Long = System.currentTimeMillis(),
-    val isSavedStatus: Boolean = true
+    val isSavedStatus: Boolean = true,
+    val speechStatus: SpeechRecognitionStatus = SpeechRecognitionStatus.IDLE_SILENCE,
+    val lastRecognizedSnippet: String = ""
 ) {
     val contentText: String
         get() = contentValue.text
@@ -62,6 +71,19 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
     private var autoSaveJob: Job? = null
 
     init {
+        // Monitor live amplitude to switch between IDLE_SILENCE (grey) and HEARING_SOUND (blue)
+        viewModelScope.launch {
+            audioCaptureEngine.currentAmplitude.collect { amplitude ->
+                if (_uiState.value.speechStatus != SpeechRecognitionStatus.WORDS_RECOGNIZED) {
+                    if (amplitude > 0.08f) {
+                        _uiState.update { it.copy(speechStatus = SpeechRecognitionStatus.HEARING_SOUND) }
+                    } else {
+                        _uiState.update { it.copy(speechStatus = SpeechRecognitionStatus.IDLE_SILENCE) }
+                    }
+                }
+            }
+        }
+
         // Collect emitted audio chunks and run offline Whisper inference pipeline
         viewModelScope.launch {
             audioCaptureEngine.audioChunks.collect { chunk ->
@@ -72,7 +94,30 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
 
                 val transcriptionResult = whisperInferenceEngine.transcribeChunk(chunk)
                 if (transcriptionResult.text.isNotBlank()) {
+                    _uiState.update {
+                        it.copy(
+                            speechStatus = SpeechRecognitionStatus.WORDS_RECOGNIZED,
+                            lastRecognizedSnippet = transcriptionResult.text.trim()
+                        )
+                    }
                     appendTranscribedText(transcriptionResult.text)
+
+                    // Hold the green recognized state for 1.8s so the user clearly sees confirmation
+                    kotlinx.coroutines.delay(1800L)
+                    _uiState.update {
+                        it.copy(
+                            speechStatus = if (currentAmplitude.value > 0.08f) SpeechRecognitionStatus.HEARING_SOUND else SpeechRecognitionStatus.IDLE_SILENCE
+                        )
+                    }
+                } else if (currentAmplitude.value > 0.15f) {
+                    // Audio was loud enough but no words were deciphered
+                    _uiState.update { it.copy(speechStatus = SpeechRecognitionStatus.NO_WORDS_DETECTED) }
+                    kotlinx.coroutines.delay(1000L)
+                    _uiState.update {
+                        it.copy(
+                            speechStatus = if (currentAmplitude.value > 0.08f) SpeechRecognitionStatus.HEARING_SOUND else SpeechRecognitionStatus.IDLE_SILENCE
+                        )
+                    }
                 }
             }
         }

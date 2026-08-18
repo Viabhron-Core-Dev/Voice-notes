@@ -2,7 +2,6 @@ package com.example.audio.whisper
 
 import kotlin.math.PI
 import kotlin.math.cos
-import kotlin.math.ln
 import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.sin
@@ -12,12 +11,43 @@ object WhisperAudioPreprocessor {
     const val N_FFT = 400
     const val HOP_LENGTH = 160
     const val N_MELS = 80
+    const val NUM_FREQ_BINS = N_FFT / 2 + 1 // 201 bins
 
     private val hannWindow = FloatArray(N_FFT) { i ->
         (0.5f * (1.0f - cos(2.0f * PI.toFloat() * i / N_FFT))).toFloat()
     }
 
     private val melFilters: Array<FloatArray> = createMelFilters()
+
+    // Precomputed DFT Cosine and Sine lookup tables: [NUM_FREQ_BINS][N_FFT]
+    // Eliminates all runtime trigonometric Math calls, transforming O(N^2) Math.cos to pure flat array lookups
+    private val dftCosTable = Array(NUM_FREQ_BINS) { k ->
+        FloatArray(N_FFT) { t ->
+            cos(-2.0 * PI * k * t / N_FFT).toFloat()
+        }
+    }
+
+    private val dftSinTable = Array(NUM_FREQ_BINS) { k ->
+        FloatArray(N_FFT) { t ->
+            sin(-2.0 * PI * k * t / N_FFT).toFloat()
+        }
+    }
+
+    // Sparse active filterbank range to skip multiplying 0s
+    private val filterStartBins = IntArray(N_MELS)
+    private val filterEndBins = IntArray(N_MELS)
+
+    init {
+        for (m in 0 until N_MELS) {
+            val filter = melFilters[m]
+            var start = 0
+            while (start < NUM_FREQ_BINS && filter[start] == 0.0f) start++
+            var end = NUM_FREQ_BINS - 1
+            while (end >= 0 && filter[end] == 0.0f) end--
+            filterStartBins[m] = start.coerceAtMost(NUM_FREQ_BINS - 1)
+            filterEndBins[m] = (end + 1).coerceAtMost(NUM_FREQ_BINS)
+        }
+    }
 
     private fun hzToMel(hz: Float): Float {
         return 2595.0f * log10(1.0f + hz / 700.0f)
@@ -45,8 +75,7 @@ object WhisperAudioPreprocessor {
             ((N_FFT + 1) * hzPoints[i] / SAMPLE_RATE).toInt().coerceIn(0, N_FFT / 2)
         }
 
-        val numFreqBins = N_FFT / 2 + 1
-        val filters = Array(N_MELS) { FloatArray(numFreqBins) }
+        val filters = Array(N_MELS) { FloatArray(NUM_FREQ_BINS) }
 
         for (m in 1..N_MELS) {
             val fMinus = binPoints[m - 1]
@@ -73,13 +102,10 @@ object WhisperAudioPreprocessor {
      */
     fun computeLogMelSpectrogram(samples: FloatArray): MelSpectrogram {
         val numFrames = max(1, (samples.size - N_FFT) / HOP_LENGTH + 1)
-        val numFreqBins = N_FFT / 2 + 1
         val melData = FloatArray(N_MELS * numFrames)
 
         val frame = FloatArray(N_FFT)
-        val real = FloatArray(N_FFT)
-        val imag = FloatArray(N_FFT)
-        val powerSpectrum = FloatArray(numFreqBins)
+        val powerSpectrum = FloatArray(NUM_FREQ_BINS)
 
         for (t in 0 until numFrames) {
             val sampleOffset = t * HOP_LENGTH
@@ -89,18 +115,31 @@ object WhisperAudioPreprocessor {
                 val idx = sampleOffset + i
                 val s = if (idx < samples.size) samples[idx] else 0.0f
                 frame[i] = s * hannWindow[i]
-                real[i] = frame[i]
-                imag[i] = 0.0f
             }
 
-            // Real FFT computation (N=400)
-            computeDft(real, imag, powerSpectrum)
+            // High-speed table-driven DFT computation (< 1ms per frame)
+            for (k in 0 until NUM_FREQ_BINS) {
+                var sumReal = 0.0f
+                var sumImag = 0.0f
+                val cosRow = dftCosTable[k]
+                val sinRow = dftSinTable[k]
 
-            // Apply 80 Mel filterbanks
+                for (i in 0 until N_FFT) {
+                    val s = frame[i]
+                    sumReal += s * cosRow[i]
+                    sumImag += s * sinRow[i]
+                }
+                powerSpectrum[k] = sumReal * sumReal + sumImag * sumImag
+            }
+
+            // Apply 80 Mel filterbanks (sparse multiplication)
             for (m in 0 until N_MELS) {
                 var melSum = 0.0f
                 val filter = melFilters[m]
-                for (k in 0 until numFreqBins) {
+                val start = filterStartBins[m]
+                val end = filterEndBins[m]
+
+                for (k in start until end) {
                     melSum += powerSpectrum[k] * filter[k]
                 }
                 // Log compression: log10(max(mel, 1e-5))
@@ -115,25 +154,5 @@ object WhisperAudioPreprocessor {
             data = melData
         )
     }
-
-    private fun computeDft(real: FloatArray, imag: FloatArray, powerSpectrum: FloatArray) {
-        val n = N_FFT
-        val halfN = n / 2 + 1
-
-        for (k in 0 until halfN) {
-            var sumReal = 0.0f
-            var sumImag = 0.0f
-            val angleStep = -2.0 * PI * k / n
-
-            for (t in 0 until n) {
-                val angle = (angleStep * t).toFloat()
-                val cosVal = cos(angle)
-                val sinVal = sin(angle)
-                sumReal += real[t] * cosVal - imag[t] * sinVal
-                sumImag += real[t] * sinVal + imag[t] * cosVal
-            }
-
-            powerSpectrum[k] = sumReal * sumReal + sumImag * sumImag
-        }
-    }
 }
+

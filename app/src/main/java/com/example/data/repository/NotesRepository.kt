@@ -62,92 +62,58 @@ class NotesRepository(
         LogKeeperManager.log(LogTag.Storage, "Note #$id color updated to ${color.displayName}")
     }
 
+    fun getNotesByFolder(folderName: String): Flow<List<NoteEntity>> = noteDao.getNotesByFolder(folderName)
+
+    fun getAllFolderNames(): Flow<List<String>> = noteDao.getAllFolderNames()
+
+    suspend fun batchDelete(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        noteDao.deleteNotesByIds(ids)
+        LogKeeperManager.log(LogTag.Storage, "Batch deleted ${ids.size} notes (IDs: $ids)")
+    }
+
+    suspend fun batchSetPin(ids: List<Long>, isPinned: Boolean) {
+        if (ids.isEmpty()) return
+        noteDao.updateBatchPinStatus(ids, isPinned)
+        LogKeeperManager.log(LogTag.Storage, "Batch pin status changed to $isPinned for ${ids.size} notes")
+    }
+
+    suspend fun batchSetArchive(ids: List<Long>, isArchived: Boolean) {
+        if (ids.isEmpty()) return
+        noteDao.updateBatchArchiveStatus(ids, isArchived)
+        LogKeeperManager.log(LogTag.Storage, "Batch archive status changed to $isArchived for ${ids.size} notes")
+    }
+
+    suspend fun batchSetColor(ids: List<Long>, color: NoteColor) {
+        if (ids.isEmpty()) return
+        noteDao.updateBatchNoteColor(ids, color.name)
+        LogKeeperManager.log(LogTag.Storage, "Batch color set to ${color.displayName} for ${ids.size} notes")
+    }
+
+    suspend fun batchSetFolder(ids: List<Long>, folderName: String?) {
+        if (ids.isEmpty()) return
+        noteDao.updateBatchFolderName(ids, folderName)
+        LogKeeperManager.log(LogTag.Storage, "Batch moved ${ids.size} notes to folder '${folderName ?: "None"}'")
+    }
+
+    suspend fun updateNoteOrder(id: Long, orderIndex: Int) {
+        noteDao.updateNoteOrder(id, orderIndex)
+    }
+
     suspend fun addQuickNote(
         title: String,
         content: String = "",
         color: NoteColor = NoteColor.YELLOW,
-        isChecklist: Boolean = false
+        isChecklist: Boolean = false,
+        folderName: String? = null
     ): Long {
         val note = NoteEntity(
             title = title,
             content = content,
             colorTheme = color.name,
-            isChecklist = isChecklist
+            isChecklist = isChecklist,
+            folderName = folderName
         )
         return insertNote(note)
-    }
-
-    suspend fun ensureStarterNotesIfEmpty() {
-        val count = noteDao.getActiveNoteCount()
-        if (count == 0) {
-            LogKeeperManager.log(LogTag.Storage, "No notes found in Room DB. Populating default seed notes...")
-            val starterNotes = listOf(
-                NoteEntity(
-                    title = "To do",
-                    content = "Buy groceries\nReview UI changes\nCheck Log Keeper",
-                    colorTheme = NoteColor.PINK.name,
-                    isPinned = true,
-                    isChecklist = true,
-                    createdAt = System.currentTimeMillis() - 3600000,
-                    updatedAt = System.currentTimeMillis() - 3600000
-                ),
-                NoteEntity(
-                    title = "Record of things bought",
-                    content = "Microphone adapter\nStylus pen\nCoffee beans",
-                    colorTheme = NoteColor.PINK.name,
-                    isPinned = false,
-                    isChecklist = false,
-                    createdAt = System.currentTimeMillis() - 86400000,
-                    updatedAt = System.currentTimeMillis() - 86400000
-                ),
-                NoteEntity(
-                    title = "Good prompts",
-                    content = "System instructions for Android voice offline transcriber",
-                    colorTheme = NoteColor.PEACH.name,
-                    isPinned = true,
-                    isChecklist = true,
-                    createdAt = System.currentTimeMillis() - 7200000,
-                    updatedAt = System.currentTimeMillis() - 7200000
-                ),
-                NoteEntity(
-                    title = "Omnivian",
-                    content = "Dual engine cross-platform architecture concept",
-                    colorTheme = NoteColor.YELLOW.name,
-                    isPinned = false,
-                    isChecklist = false,
-                    createdAt = System.currentTimeMillis() - 14400000,
-                    updatedAt = System.currentTimeMillis() - 14400000
-                ),
-                NoteEntity(
-                    title = "A web novel ai writer",
-                    content = "Offline narrative generation draft with local persistence",
-                    colorTheme = NoteColor.YELLOW.name,
-                    isPinned = false,
-                    isChecklist = false,
-                    createdAt = System.currentTimeMillis() - 172800000,
-                    updatedAt = System.currentTimeMillis() - 172800000
-                ),
-                NoteEntity(
-                    title = "Voice Notes offline engine",
-                    content = "Room SQLite Database layer initialized for fast 60fps scrolling and offline persistence.",
-                    colorTheme = NoteColor.BLUE.name,
-                    isPinned = false,
-                    isChecklist = false,
-                    createdAt = System.currentTimeMillis() - 1800000,
-                    updatedAt = System.currentTimeMillis() - 1800000
-                ),
-                NoteEntity(
-                    title = "Meeting agenda - Board",
-                    content = "1. Financial review\n2. Q3 Roadmap release\n3. Mobile app deploy",
-                    colorTheme = NoteColor.GREEN.name,
-                    isPinned = false,
-                    isChecklist = false,
-                    createdAt = System.currentTimeMillis() - 900000,
-                    updatedAt = System.currentTimeMillis() - 900000
-                )
-            )
-            noteDao.insertNotes(starterNotes)
-            LogKeeperManager.log(LogTag.Storage, "Inserted ${starterNotes.size} starter notes into Room database.")
-        }
     }
 }

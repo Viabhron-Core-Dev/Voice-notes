@@ -51,4 +51,27 @@ interface NoteDao {
 
     @Query("UPDATE notes SET colorTheme = :colorName, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateNoteColor(id: Long, colorName: String, updatedAt: Long = System.currentTimeMillis())
+    @Query("SELECT * FROM notes WHERE isArchived = 0 AND folderName = :folderName ORDER BY orderIndex ASC, updatedAt DESC")
+    fun getNotesByFolder(folderName: String): Flow<List<NoteEntity>>
+
+    @Query("SELECT DISTINCT folderName FROM notes WHERE folderName IS NOT NULL AND folderName != ''")
+    fun getAllFolderNames(): Flow<List<String>>
+
+    @Query("DELETE FROM notes WHERE id IN (:ids)")
+    suspend fun deleteNotesByIds(ids: List<Long>)
+
+    @Query("UPDATE notes SET isPinned = :isPinned, updatedAt = :updatedAt WHERE id IN (:ids)")
+    suspend fun updateBatchPinStatus(ids: List<Long>, isPinned: Boolean, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE notes SET isArchived = :isArchived, updatedAt = :updatedAt WHERE id IN (:ids)")
+    suspend fun updateBatchArchiveStatus(ids: List<Long>, isArchived: Boolean, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE notes SET colorTheme = :colorName, updatedAt = :updatedAt WHERE id IN (:ids)")
+    suspend fun updateBatchNoteColor(ids: List<Long>, colorName: String, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE notes SET folderName = :folderName, updatedAt = :updatedAt WHERE id IN (:ids)")
+    suspend fun updateBatchFolderName(ids: List<Long>, folderName: String?, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE notes SET orderIndex = :orderIndex WHERE id = :id")
+    suspend fun updateNoteOrder(id: Long, orderIndex: Int)
 }

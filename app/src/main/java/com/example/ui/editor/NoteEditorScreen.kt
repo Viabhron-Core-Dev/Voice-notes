@@ -245,6 +245,17 @@ fun NoteEditorScreen(
                 },
                 actions = {
                     // Voice Dictation Action Button (Triggers 16kHz PCM AudioRecord)
+                    val micIconTint = if (captureState is AudioCaptureState.Recording) {
+                        when (uiState.speechStatus) {
+                            SpeechRecognitionStatus.WORDS_RECOGNIZED -> Color(0xFF10B981) // Green when converted
+                            SpeechRecognitionStatus.HEARING_SOUND -> Color(0xFF0284C7)    // Blue when hearing sound
+                            SpeechRecognitionStatus.NO_WORDS_DETECTED -> Color(0xFFEF4444)// Red if not recognized
+                            SpeechRecognitionStatus.IDLE_SILENCE -> Color(0xFF64748B)     // Grey when silent
+                        }
+                    } else {
+                        uiState.color.stripeColor
+                    }
+
                     IconButton(
                         onClick = {
                             if (captureState is AudioCaptureState.Recording) {
@@ -258,7 +269,7 @@ fun NoteEditorScreen(
                         Icon(
                             imageVector = Icons.Default.Mic,
                             contentDescription = "Dictate Note",
-                            tint = if (captureState is AudioCaptureState.Recording) Color(0xFFEF4444) else uiState.color.stripeColor
+                            tint = micIconTint
                         )
                     }
 
@@ -390,6 +401,8 @@ fun NoteEditorScreen(
                         durationMs = recordingState?.durationMs ?: 0L,
                         amplitude = currentAmplitude,
                         chunkCount = recordingState?.totalChunksEmitted ?: 0,
+                        speechStatus = uiState.speechStatus,
+                        lastRecognizedSnippet = uiState.lastRecognizedSnippet,
                         latestBenchmark = benchmarkStats.latestBenchmark,
                         onStopAndSave = { viewModel.stopVoiceRecording() },
                         onCancel = { viewModel.stopVoiceRecording() }

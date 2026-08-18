@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -8,6 +10,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +34,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -40,9 +45,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.audio.whisper.InferenceBenchmark
+import com.example.ui.editor.SpeechRecognitionStatus
 
 @Composable
 fun VoiceRecordingHud(
@@ -50,6 +57,8 @@ fun VoiceRecordingHud(
     durationMs: Long,
     amplitude: Float,
     chunkCount: Int,
+    speechStatus: SpeechRecognitionStatus = SpeechRecognitionStatus.IDLE_SILENCE,
+    lastRecognizedSnippet: String = "",
     latestBenchmark: InferenceBenchmark? = null,
     onStopAndSave: () -> Unit,
     onCancel: () -> Unit,
@@ -58,6 +67,20 @@ fun VoiceRecordingHud(
     val minutes = (durationMs / 1000) / 60
     val seconds = (durationMs / 1000) % 60
     val timeFormatted = String.format("%02d:%02d", minutes, seconds)
+
+    // Dynamic Color Mapping based on recognition state
+    val targetPulseColor = when (speechStatus) {
+        SpeechRecognitionStatus.WORDS_RECOGNIZED -> Color(0xFF10B981) // Emerald Green (Transcribed words)
+        SpeechRecognitionStatus.HEARING_SOUND -> Color(0xFF0284C7)    // Sky/Ocean Blue (Hearing active speech)
+        SpeechRecognitionStatus.NO_WORDS_DETECTED -> Color(0xFFEF4444)// Soft Red (No words deciphered)
+        SpeechRecognitionStatus.IDLE_SILENCE -> Color(0xFF64748B)     // Cool Slate / Grey (Silence)
+    }
+
+    val animatedPulseColor by animateColorAsState(
+        targetValue = targetPulseColor,
+        animationSpec = tween(durationMillis = 300),
+        label = "pulse_color_anim"
+    )
 
     // Breathing pulse for idle recording + dynamic reaction on voice loudness
     val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
@@ -78,8 +101,12 @@ fun VoiceRecordingHud(
         label = "voice_scale"
     )
 
-    val micHaloScale = if (amplitude > 0.08f) dynamicVoiceScale else idlePulse
-    val haloAlpha = (0.2f + amplitude * 0.5f).coerceIn(0.15f, 0.75f)
+    val micHaloScale = if (amplitude > 0.08f || speechStatus == SpeechRecognitionStatus.WORDS_RECOGNIZED) {
+        dynamicVoiceScale
+    } else {
+        idlePulse
+    }
+    val haloAlpha = (0.22f + amplitude * 0.55f).coerceIn(0.18f, 0.85f)
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -89,115 +116,153 @@ fun VoiceRecordingHud(
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
             .testTag("voice_recording_hud")
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            // Pulsing Mic Icon with Live Halo
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier.size(38.dp),
-                    contentAlignment = Alignment.Center
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Pulsing Mic Icon with Adaptive State Halo
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false)
                 ) {
-                    // Outer animated reactive halo
                     Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .scale(micHaloScale)
-                            .background(Color(0xFFEF4444).copy(alpha = haloAlpha), CircleShape)
-                    )
-                    // Inner solid mic badge
-                    Box(
-                        modifier = Modifier
-                            .size(30.dp)
-                            .background(Color(0xFFEF4444), CircleShape),
+                        modifier = Modifier.size(38.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Mic,
-                            contentDescription = "Recording",
-                            tint = Color.White,
-                            modifier = Modifier.size(17.dp)
+                        // Outer animated reactive halo (Green, Blue, Grey, or Red)
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .scale(micHaloScale)
+                                .background(animatedPulseColor.copy(alpha = haloAlpha), CircleShape)
+                        )
+                        // Inner solid mic badge
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .background(animatedPulseColor, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Mic,
+                                contentDescription = "Recording",
+                                tint = Color.White,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Column {
+                        Text(
+                            text = timeFormatted,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontSize = 15.sp
+                            )
+                        )
+
+                        val (statusText, statusColor) = when (speechStatus) {
+                            SpeechRecognitionStatus.WORDS_RECOGNIZED -> Pair("✓ Converted to text", Color(0xFF34D399))
+                            SpeechRecognitionStatus.HEARING_SOUND -> Pair("● Hearing sound...", Color(0xFF38BDF8))
+                            SpeechRecognitionStatus.NO_WORDS_DETECTED -> Pair("✕ No words detected", Color(0xFFF87171))
+                            SpeechRecognitionStatus.IDLE_SILENCE -> Pair("○ Silence (Speak to convert)", Color(0xFF94A3B8))
+                        }
+
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = statusColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.width(10.dp))
+                // Real-time Adaptive Waveform
+                AudioWaveformBars(
+                    amplitude = amplitude,
+                    speechStatus = speechStatus,
+                    pulseColor = animatedPulseColor,
+                    modifier = Modifier
+                        .width(76.dp)
+                        .height(28.dp)
+                        .padding(horizontal = 4.dp)
+                )
 
-                Column {
-                    Text(
-                        text = timeFormatted,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            fontSize = 15.sp
+                // Stop / Cancel / Done Buttons
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onCancel,
+                        modifier = Modifier
+                            .size(34.dp)
+                            .testTag("btn_cancel_recording")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel",
+                            tint = Color(0xFF94A3B8),
+                            modifier = Modifier.size(18.dp)
                         )
-                    )
-
-                    val statusSubtitle = if (latestBenchmark != null) {
-                        "⚡ ${String.format("%.1f", latestBenchmark.speedupMultiplier)}x RTF"
-                    } else if (chunkCount > 0) {
-                        "$chunkCount chunks"
-                    } else {
-                        "Listening..."
                     }
 
-                    Text(
-                        text = statusSubtitle,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = if (latestBenchmark != null) Color(0xFF38BDF8) else Color(0xFF94A3B8),
-                            fontSize = 11.sp,
-                            fontWeight = if (latestBenchmark != null) FontWeight.SemiBold else FontWeight.Normal
+                    Spacer(modifier = Modifier.width(2.dp))
+
+                    IconButton(
+                        onClick = onStopAndSave,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(Color(0xFF00897B), CircleShape)
+                            .testTag("btn_done_recording")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Done,
+                            contentDescription = "Finish Dictation",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
                         )
-                    )
+                    }
                 }
             }
 
-            // Real-time 7-Bar Organic Audio Waveform
-            AudioWaveformBars(
-                amplitude = amplitude,
-                modifier = Modifier
-                    .width(96.dp)
-                    .height(30.dp)
-            )
-
-            // Stop / Done Button
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(
-                    onClick = onCancel,
+            // Live recognized words banner preview (proves conversion to user immediately)
+            AnimatedVisibility(
+                visible = lastRecognizedSnippet.isNotBlank() && speechStatus == SpeechRecognitionStatus.WORDS_RECOGNIZED,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF064E3B).copy(alpha = 0.6f),
                     modifier = Modifier
-                        .size(34.dp)
-                        .testTag("btn_cancel_recording")
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Cancel",
-                        tint = Color(0xFF94A3B8),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                IconButton(
-                    onClick = onStopAndSave,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(Color(0xFF00897B), CircleShape)
-                        .testTag("btn_done_recording")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Done,
-                        contentDescription = "Finish Dictation",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Transcribed: \"$lastRecognizedSnippet\"",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFFA7F3D0),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -207,6 +272,8 @@ fun VoiceRecordingHud(
 @Composable
 fun AudioWaveformBars(
     amplitude: Float,
+    speechStatus: SpeechRecognitionStatus,
+    pulseColor: Color,
     modifier: Modifier = Modifier
 ) {
     val barCount = 7
@@ -232,19 +299,18 @@ fun AudioWaveformBars(
                 label = "bar_$i"
             )
 
-            val barColor = if (amplitude > 0.15f) {
-                Brush.verticalGradient(
-                    listOf(
-                        Color(0xFF38BDF8),
-                        Color(0xFF0284C7)
-                    )
+            val barColor = when (speechStatus) {
+                SpeechRecognitionStatus.WORDS_RECOGNIZED -> Brush.verticalGradient(
+                    listOf(Color(0xFF34D399), Color(0xFF059669))
                 )
-            } else {
-                Brush.verticalGradient(
-                    listOf(
-                        Color(0xFF475569),
-                        Color(0xFF334155)
-                    )
+                SpeechRecognitionStatus.HEARING_SOUND -> Brush.verticalGradient(
+                    listOf(Color(0xFF38BDF8), Color(0xFF0284C7))
+                )
+                SpeechRecognitionStatus.NO_WORDS_DETECTED -> Brush.verticalGradient(
+                    listOf(Color(0xFFF87171), Color(0xFFDC2626))
+                )
+                SpeechRecognitionStatus.IDLE_SILENCE -> Brush.verticalGradient(
+                    listOf(Color(0xFF64748B), Color(0xFF334155))
                 )
             }
 

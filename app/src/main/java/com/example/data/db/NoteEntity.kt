@@ -16,6 +16,8 @@ data class NoteEntity(
     val isPinned: Boolean = false,
     val isChecklist: Boolean = false,
     val isArchived: Boolean = false,
+    val folderName: String? = null,
+    val orderIndex: Int = 0,
     val hasAudio: Boolean = false,
     val audioPath: String? = null,
     val audioDurationMs: Long = 0L,
