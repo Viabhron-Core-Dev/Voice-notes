@@ -3,6 +3,9 @@ package com.example.ui.editor
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.audio.AudioCaptureState
+import com.example.audio.RawAudioCaptureEngine
+import com.example.audio.whisper.WhisperInferenceEngine
 import com.example.data.db.NoteEntity
 import com.example.data.db.VoiceNotesDatabase
 import com.example.data.logkeeper.LogKeeperManager
@@ -33,11 +36,55 @@ data class NoteEditorUiState(
 class NoteEditorViewModel(application: Application) : AndroidViewModel(application) {
     private val database = VoiceNotesDatabase.getDatabase(application, viewModelScope)
     private val repository = NotesRepository(database.noteDao())
+    private val modelDao = database.modelDao()
+    private val audioCaptureEngine = RawAudioCaptureEngine(application, viewModelScope)
+    private val whisperInferenceEngine = WhisperInferenceEngine(application)
+
+    val captureState: StateFlow<AudioCaptureState> = audioCaptureEngine.captureState
+    val currentAmplitude: StateFlow<Float> = audioCaptureEngine.currentAmplitude
+    val benchmarkStats = com.example.audio.whisper.InferenceBenchmarkTracker.stats
 
     private val _uiState = MutableStateFlow(NoteEditorUiState())
     val uiState: StateFlow<NoteEditorUiState> = _uiState.asStateFlow()
 
     private var initialNoteState: NoteEntity? = null
+
+    init {
+        // Collect emitted audio chunks and run offline Whisper inference pipeline
+        viewModelScope.launch {
+            audioCaptureEngine.audioChunks.collect { chunk ->
+                val activeModel = modelDao.getActiveModel().firstOrNull()
+                if (activeModel != null) {
+                    whisperInferenceEngine.loadModel(activeModel)
+                }
+
+                val transcriptionResult = whisperInferenceEngine.transcribeChunk(chunk)
+                if (transcriptionResult.text.isNotBlank()) {
+                    _uiState.update { current ->
+                        val separator = if (current.content.isBlank()) "" else "\n"
+                        current.copy(
+                            content = current.content + separator + transcriptionResult.text,
+                            isSavedStatus = false
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun startVoiceRecording(): Boolean {
+        return audioCaptureEngine.startCapture()
+    }
+
+    fun stopVoiceRecording() {
+        audioCaptureEngine.stopCapture()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        audioCaptureEngine.release()
+        whisperInferenceEngine.release()
+    }
 
     fun initialize(noteId: Long?, initialColor: NoteColor = NoteColor.YELLOW) {
         if (_uiState.value.isLoaded) return

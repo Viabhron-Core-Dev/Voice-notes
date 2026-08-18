@@ -1,13 +1,21 @@
 package com.example.ui.editor
 
+import android.Manifest
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +23,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
@@ -23,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.PushPin
@@ -62,7 +72,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.audio.AudioCaptureState
+import com.example.data.logkeeper.LogKeeperManager
+import com.example.data.logkeeper.LogTag
 import com.example.data.model.NoteColor
+import com.example.ui.components.VoiceRecordingHud
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -81,6 +95,9 @@ fun NoteEditorScreen(
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val captureState by viewModel.captureState.collectAsStateWithLifecycle()
+    val currentAmplitude by viewModel.currentAmplitude.collectAsStateWithLifecycle()
+    val benchmarkStats by viewModel.benchmarkStats.collectAsStateWithLifecycle()
 
     val animatedBgColor by animateColorAsState(
         targetValue = uiState.color.bgColor,
@@ -90,10 +107,25 @@ fun NoteEditorScreen(
 
     var showPaletteDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var showPermissionRationaleDialog by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
 
-    // Intercept hardware and system back gesture to auto-save
+    // Dynamic runtime microphone permission launcher
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            LogKeeperManager.log(LogTag.VoiceEngine, "RECORD_AUDIO permission granted by user")
+            viewModel.startVoiceRecording()
+        } else {
+            LogKeeperManager.log(LogTag.VoiceEngine, "RECORD_AUDIO permission denied by user")
+            showPermissionRationaleDialog = true
+        }
+    }
+
+    // Intercept hardware and system back gesture to auto-save and stop capture
     BackHandler {
+        viewModel.stopVoiceRecording()
         viewModel.saveNote()
         onNavigateBack()
     }
@@ -138,6 +170,7 @@ fun NoteEditorScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = {
+                            viewModel.stopVoiceRecording()
                             viewModel.saveNote()
                             onNavigateBack()
                         },
@@ -151,6 +184,24 @@ fun NoteEditorScreen(
                     }
                 },
                 actions = {
+                    // Voice Dictation Action Button (Triggers 16kHz PCM AudioRecord)
+                    IconButton(
+                        onClick = {
+                            if (captureState is AudioCaptureState.Recording) {
+                                viewModel.stopVoiceRecording()
+                            } else {
+                                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        },
+                        modifier = Modifier.testTag("editor_mic_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "Dictate Note",
+                            tint = if (captureState is AudioCaptureState.Recording) Color(0xFFEF4444) else uiState.color.stripeColor
+                        )
+                    }
+
                     // Pinned status toggle
                     IconButton(
                         onClick = { viewModel.togglePinned() },
@@ -178,6 +229,7 @@ fun NoteEditorScreen(
                     // Explicit Save Checkmark
                     IconButton(
                         onClick = {
+                            viewModel.stopVoiceRecording()
                             viewModel.saveNote()
                             onNavigateBack()
                         },
@@ -223,10 +275,30 @@ fun NoteEditorScreen(
             )
         },
         bottomBar = {
-            EditorBottomBar(
-                uiState = uiState,
-                backgroundColor = animatedBgColor
-            )
+            Column {
+                // Floating Real-Time Audio Recording HUD with Live Waveform
+                AnimatedVisibility(
+                    visible = captureState is AudioCaptureState.Recording,
+                    enter = slideInVertically(initialOffsetY = { it }),
+                    exit = slideOutVertically(targetOffsetY = { it })
+                ) {
+                    val recordingState = captureState as? AudioCaptureState.Recording
+                    VoiceRecordingHud(
+                        isRecording = true,
+                        durationMs = recordingState?.durationMs ?: 0L,
+                        amplitude = currentAmplitude,
+                        chunkCount = recordingState?.totalChunksEmitted ?: 0,
+                        latestBenchmark = benchmarkStats.latestBenchmark,
+                        onStopAndSave = { viewModel.stopVoiceRecording() },
+                        onCancel = { viewModel.stopVoiceRecording() }
+                    )
+                }
+
+                EditorBottomBar(
+                    uiState = uiState,
+                    backgroundColor = animatedBgColor
+                )
+            }
         }
     ) { innerPadding ->
         Box(
@@ -241,6 +313,34 @@ fun NoteEditorScreen(
                 onContentChange = { viewModel.onContentChanged(it) }
             )
         }
+    }
+
+    // Permission Rationale Dialog
+    if (showPermissionRationaleDialog) {
+        AlertDialog(
+            onDismissRequest = { showPermissionRationaleDialog = false },
+            title = { Text("Microphone Access Required") },
+            text = {
+                Text(
+                    "ColorNote uses the microphone strictly for on-device offline voice-to-text transcription. Audio is processed directly in memory (16kHz PCM) and never saved to storage or transmitted over the internet."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showPermissionRationaleDialog = false
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                ) {
+                    Text("Grant Permission")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermissionRationaleDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // Color Palette Selection Dialog
