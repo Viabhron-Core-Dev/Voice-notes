@@ -1,6 +1,11 @@
 package com.example.ui.editor
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -11,6 +16,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,22 +25,34 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.ColorLens
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FormatBold
+import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.filled.FormatQuote
+import androidx.compose.material.icons.filled.HorizontalRule
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -44,6 +62,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -54,6 +74,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +82,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.PlatformTextStyle
@@ -77,6 +100,7 @@ import com.example.data.logkeeper.LogKeeperManager
 import com.example.data.logkeeper.LogTag
 import com.example.data.model.NoteColor
 import com.example.ui.components.VoiceRecordingHud
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -90,6 +114,10 @@ fun NoteEditorScreen(
     initialColor: NoteColor = NoteColor.YELLOW,
     viewModel: NoteEditorViewModel = viewModel()
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
     LaunchedEffect(noteId) {
         viewModel.initialize(noteId, initialColor)
     }
@@ -107,8 +135,39 @@ fun NoteEditorScreen(
 
     var showPaletteDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var showClearConfirmDialog by remember { mutableStateOf(false) }
     var showPermissionRationaleDialog by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+
+    // Text share helper
+    val shareNoteText: () -> Unit = {
+        val titleText = uiState.title.ifBlank { "ColorNote Note" }
+        val shareBody = if (uiState.title.isNotBlank()) {
+            "${uiState.title}\n\n${uiState.contentText}"
+        } else {
+            uiState.contentText
+        }
+
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            putExtra(Intent.EXTRA_SUBJECT, titleText)
+            putExtra(Intent.EXTRA_TEXT, shareBody)
+            type = "text/plain"
+        }
+        val shareIntent = Intent.createChooser(sendIntent, "Share Note via")
+        context.startActivity(shareIntent)
+        LogKeeperManager.log(LogTag.UI_Editor, "Shared note text via Android ShareSheet")
+    }
+
+    // Text copy helper
+    val copyNoteText: () -> Unit = {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val clip = ClipData.newPlainText("Note Content", uiState.contentText)
+        clipboard?.setPrimaryClip(clip)
+        scope.launch {
+            snackbarHostState.showSnackbar("Note copied to clipboard")
+        }
+        LogKeeperManager.log(LogTag.UI_Editor, "Copied note text to clipboard")
+    }
 
     // Dynamic runtime microphone permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -134,6 +193,7 @@ fun NoteEditorScreen(
         modifier = modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -202,6 +262,18 @@ fun NoteEditorScreen(
                         )
                     }
 
+                    // Share Action Button
+                    IconButton(
+                        onClick = { shareNoteText() },
+                        modifier = Modifier.testTag("editor_share_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Share Note",
+                            tint = Color(0xFF334155)
+                        )
+                    }
+
                     // Pinned status toggle
                     IconButton(
                         onClick = { viewModel.togglePinned() },
@@ -242,7 +314,7 @@ fun NoteEditorScreen(
                         )
                     }
 
-                    // More Menu
+                    // More Options Dropdown Menu
                     Box {
                         IconButton(onClick = { menuExpanded = true }) {
                             Icon(
@@ -256,6 +328,36 @@ fun NoteEditorScreen(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false }
                         ) {
+                            DropdownMenuItem(
+                                text = { Text("Copy All Text") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color(0xFF334155))
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    copyNoteText()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Share Note") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF334155))
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    shareNoteText()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Clear All Text") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.HorizontalRule, contentDescription = null, tint = Color(0xFFE53935))
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    showClearConfirmDialog = true
+                                }
+                            )
                             DropdownMenuItem(
                                 text = { Text("Delete Note") },
                                 leadingIcon = {
@@ -294,6 +396,18 @@ fun NoteEditorScreen(
                     )
                 }
 
+                // Quick Text Formatting Toolbar
+                TextFormattingToolbar(
+                    onInsertBullet = { viewModel.insertFormattedLine("• ") },
+                    onInsertCheckbox = { viewModel.insertFormattedLine("[ ] ") },
+                    onInsertTimestamp = { viewModel.insertTimestamp() },
+                    onInsertDivider = { viewModel.insertTextAtCursor("\n-----------\n") },
+                    onInsertBold = { viewModel.insertTextAtCursor("**", "**") },
+                    onInsertQuote = { viewModel.insertFormattedLine("> ") },
+                    accentColor = uiState.color.stripeColor,
+                    backgroundColor = animatedBgColor
+                )
+
                 EditorBottomBar(
                     uiState = uiState,
                     backgroundColor = animatedBgColor
@@ -308,9 +422,9 @@ fun NoteEditorScreen(
                 .background(animatedBgColor)
         ) {
             TextEditorView(
-                content = uiState.content,
+                contentValue = uiState.contentValue,
                 stripeColor = uiState.color.stripeColor,
-                onContentChange = { viewModel.onContentChanged(it) }
+                onContentValueChange = { viewModel.onContentValueChanged(it) }
             )
         }
     }
@@ -390,6 +504,30 @@ fun NoteEditorScreen(
         )
     }
 
+    // Clear Text Confirmation Dialog
+    if (showClearConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirmDialog = false },
+            title = { Text("Clear Note Content?") },
+            text = { Text("This will erase all typed and dictated text in this note.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirmDialog = false
+                        viewModel.clearContent()
+                    }
+                ) {
+                    Text("Clear All", color = Color(0xFFE53935))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirmDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // Delete Confirmation Dialog
     if (showDeleteConfirmDialog) {
         AlertDialog(
@@ -417,29 +555,144 @@ fun NoteEditorScreen(
 }
 
 @Composable
+fun TextFormattingToolbar(
+    onInsertBullet: () -> Unit,
+    onInsertCheckbox: () -> Unit,
+    onInsertTimestamp: () -> Unit,
+    onInsertDivider: () -> Unit,
+    onInsertBold: () -> Unit,
+    onInsertQuote: () -> Unit,
+    accentColor: Color,
+    backgroundColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = backgroundColor.copy(alpha = 0.95f),
+        shadowElevation = 1.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(44.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            FormatChip(
+                icon = Icons.Default.FormatListBulleted,
+                label = "Bullet",
+                onClick = onInsertBullet,
+                tint = accentColor
+            )
+            FormatChip(
+                icon = Icons.Default.CheckBox,
+                label = "Todo",
+                onClick = onInsertCheckbox,
+                tint = accentColor
+            )
+            FormatChip(
+                icon = Icons.Default.Schedule,
+                label = "Time",
+                onClick = onInsertTimestamp,
+                tint = accentColor
+            )
+            FormatChip(
+                icon = Icons.Default.FormatBold,
+                label = "Bold",
+                onClick = onInsertBold,
+                tint = accentColor
+            )
+            FormatChip(
+                icon = Icons.Default.FormatQuote,
+                label = "Quote",
+                onClick = onInsertQuote,
+                tint = accentColor
+            )
+            FormatChip(
+                icon = Icons.Default.HorizontalRule,
+                label = "Line",
+                onClick = onInsertDivider,
+                tint = accentColor
+            )
+        }
+    }
+}
+
+@Composable
+fun FormatChip(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0x12000000),
+        modifier = modifier.height(34.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = tint,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = label,
+                style = TextStyle(
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF334155)
+                )
+            )
+        }
+    }
+}
+
+@Composable
 fun TextEditorView(
-    content: String,
+    contentValue: TextFieldValue,
     stripeColor: Color,
-    onContentChange: (String) -> Unit,
+    onContentValueChange: (TextFieldValue) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
     var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val content = contentValue.text
 
     val fontSize = 17.sp
     val lineHeight = 36.sp
     val lineHeightPx = with(density) { lineHeight.toPx() }
     val topPaddingDp = 12.dp
     val topPaddingPx = with(density) { topPaddingDp.toPx() }
-    val horizontalPaddingDp = 18.dp
+    val horizontalPaddingDp = 24.dp
+    val redMarginRuleOffsetPx = with(density) { 18.dp.toPx() }
 
-    // Subtle notebook lined paper color
+    // Notebook paper ruled lines and classic left red margin
     val lineColor = Color(0xFF000000).copy(alpha = 0.08f)
+    val redMarginColor = Color(0xFFE53935).copy(alpha = 0.18f)
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .drawBehind {
+                // Draw classic left margin red rule line
+                drawLine(
+                    color = redMarginColor,
+                    start = Offset(redMarginRuleOffsetPx, 0f),
+                    end = Offset(redMarginRuleOffsetPx, size.height),
+                    strokeWidth = 1.5.dp.toPx()
+                )
+
                 val layout = textLayoutResult
                 var lastLineY = topPaddingPx
 
@@ -470,11 +723,11 @@ fun TextEditorView(
                     y += lineHeightPx
                 }
             }
-            .padding(horizontal = horizontalPaddingDp, vertical = topPaddingDp)
+            .padding(start = horizontalPaddingDp, end = 16.dp, top = topPaddingDp, bottom = topPaddingDp)
     ) {
         BasicTextField(
-            value = content,
-            onValueChange = onContentChange,
+            value = contentValue,
+            onValueChange = onContentValueChange,
             onTextLayout = { layoutResult ->
                 textLayoutResult = layoutResult
             },
@@ -531,8 +784,9 @@ fun EditorBottomBar(
         SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(date)
     }
 
-    val words = if (uiState.content.isBlank()) 0 else uiState.content.trim().split("\\s+".toRegex()).size
-    val chars = uiState.content.length
+    val content = uiState.contentText
+    val words = if (content.isBlank()) 0 else content.trim().split("\\s+".toRegex()).size
+    val chars = content.length
     val statusText = "$chars chars  |  $words words"
 
     Surface(

@@ -1,7 +1,12 @@
 package com.example.ui.components
 
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +35,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -52,6 +59,28 @@ fun VoiceRecordingHud(
     val seconds = (durationMs / 1000) % 60
     val timeFormatted = String.format("%02d:%02d", minutes, seconds)
 
+    // Breathing pulse for idle recording + dynamic reaction on voice loudness
+    val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
+    val idlePulse by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "idle_pulse"
+    )
+
+    // Voice amplitude directly drives scale multiplier
+    val dynamicVoiceScale by animateFloatAsState(
+        targetValue = 1.0f + (amplitude * 0.45f),
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 800f),
+        label = "voice_scale"
+    )
+
+    val micHaloScale = if (amplitude > 0.08f) dynamicVoiceScale else idlePulse
+    val haloAlpha = (0.2f + amplitude * 0.5f).coerceIn(0.15f, 0.75f)
+
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
@@ -66,27 +95,40 @@ fun VoiceRecordingHud(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Pulsing Mic Icon + Timer & Benchmark Badge
+            // Pulsing Mic Icon with Live Halo
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(Color(0xFFEF4444).copy(alpha = 0.2f), CircleShape),
+                    modifier = Modifier.size(38.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Recording",
-                        tint = Color(0xFFEF4444),
-                        modifier = Modifier.size(20.dp)
+                    // Outer animated reactive halo
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .scale(micHaloScale)
+                            .background(Color(0xFFEF4444).copy(alpha = haloAlpha), CircleShape)
                     )
+                    // Inner solid mic badge
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .background(Color(0xFFEF4444), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "Recording",
+                            tint = Color.White,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
                 Column {
                     Text(
@@ -94,16 +136,16 @@ fun VoiceRecordingHud(
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
-                            fontSize = 16.sp
+                            fontSize = 15.sp
                         )
                     )
 
                     val statusSubtitle = if (latestBenchmark != null) {
-                        "⚡ ${String.format("%.1f", latestBenchmark.speedupMultiplier)}x RTF (${latestBenchmark.totalDurationMs}ms)"
+                        "⚡ ${String.format("%.1f", latestBenchmark.speedupMultiplier)}x RTF"
                     } else if (chunkCount > 0) {
-                        "$chunkCount chunks processed"
+                        "$chunkCount chunks"
                     } else {
-                        "Listening (16kHz PCM)..."
+                        "Listening..."
                     }
 
                     Text(
@@ -117,12 +159,12 @@ fun VoiceRecordingHud(
                 }
             }
 
-            // Real-time Visualizer Waves
+            // Real-time 7-Bar Organic Audio Waveform
             AudioWaveformBars(
                 amplitude = amplitude,
                 modifier = Modifier
-                    .width(80.dp)
-                    .height(28.dp)
+                    .width(96.dp)
+                    .height(30.dp)
             )
 
             // Stop / Done Button
@@ -130,23 +172,23 @@ fun VoiceRecordingHud(
                 IconButton(
                     onClick = onCancel,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(34.dp)
                         .testTag("btn_cancel_recording")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Cancel",
                         tint = Color(0xFF94A3B8),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(4.dp))
 
                 IconButton(
                     onClick = onStopAndSave,
                     modifier = Modifier
-                        .size(38.dp)
+                        .size(36.dp)
                         .background(Color(0xFF00897B), CircleShape)
                         .testTag("btn_done_recording")
                 ) {
@@ -154,7 +196,7 @@ fun VoiceRecordingHud(
                         imageVector = Icons.Default.Done,
                         contentDescription = "Finish Dictation",
                         tint = Color.White,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -167,8 +209,10 @@ fun AudioWaveformBars(
     amplitude: Float,
     modifier: Modifier = Modifier
 ) {
-    val barCount = 5
-    val clampedAmp = amplitude.coerceIn(0.05f, 1.0f)
+    val barCount = 7
+    // Dynamic multipliers create an organic voice spectrum shape with distinct frequency heights
+    val multipliers = floatArrayOf(0.35f, 0.65f, 0.95f, 1.0f, 0.85f, 0.55f, 0.30f)
+    val baseNoise = floatArrayOf(0.08f, 0.12f, 0.15f, 0.18f, 0.14f, 0.10f, 0.06f)
 
     Row(
         modifier = modifier,
@@ -176,24 +220,39 @@ fun AudioWaveformBars(
         verticalAlignment = Alignment.CenterVertically
     ) {
         for (i in 0 until barCount) {
-            // Stagger wave factor based on position
-            val multiplier = when (i) {
-                0, 4 -> 0.4f
-                1, 3 -> 0.75f
-                else -> 1.0f
-            }
-            val targetHeight = (clampedAmp * multiplier * 24.dp.value).coerceIn(4f, 24f)
+            val dynamicFactor = (amplitude * multipliers[i]) + baseNoise[i]
+            val targetHeight = (dynamicFactor * 26.dp.value).coerceIn(3.5f, 26f)
+
             val animatedHeight by animateFloatAsState(
                 targetValue = targetHeight,
-                animationSpec = tween(durationMillis = 80, easing = FastOutSlowInEasing),
+                animationSpec = spring(
+                    dampingRatio = 0.45f,
+                    stiffness = 900f
+                ),
                 label = "bar_$i"
             )
 
+            val barColor = if (amplitude > 0.15f) {
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF38BDF8),
+                        Color(0xFF0284C7)
+                    )
+                )
+            } else {
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF475569),
+                        Color(0xFF334155)
+                    )
+                )
+            }
+
             Box(
                 modifier = Modifier
-                    .width(3.5.dp)
+                    .width(3.dp)
                     .height(animatedHeight.dp)
-                    .background(Color(0xFF38BDF8), RoundedCornerShape(2.dp))
+                    .background(barColor, RoundedCornerShape(2.dp))
             )
         }
     }

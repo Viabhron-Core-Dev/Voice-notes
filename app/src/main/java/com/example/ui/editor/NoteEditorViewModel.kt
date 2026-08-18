@@ -1,10 +1,13 @@
 package com.example.ui.editor
 
 import android.app.Application
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.AudioCaptureState
 import com.example.audio.RawAudioCaptureEngine
+import com.example.audio.whisper.InferenceBenchmarkTracker
 import com.example.audio.whisper.WhisperInferenceEngine
 import com.example.data.db.NoteEntity
 import com.example.data.db.VoiceNotesDatabase
@@ -12,9 +15,13 @@ import com.example.data.logkeeper.LogKeeperManager
 import com.example.data.logkeeper.LogTag
 import com.example.data.model.NoteColor
 import com.example.data.repository.NotesRepository
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -22,7 +29,7 @@ import kotlinx.coroutines.launch
 data class NoteEditorUiState(
     val noteId: Long? = null,
     val title: String = "",
-    val content: String = "",
+    val contentValue: TextFieldValue = TextFieldValue(""),
     val color: NoteColor = NoteColor.YELLOW,
     val isPinned: Boolean = false,
     val isLoaded: Boolean = false,
@@ -31,8 +38,12 @@ data class NoteEditorUiState(
     val audioDurationMs: Long = 0L,
     val updatedAt: Long = System.currentTimeMillis(),
     val isSavedStatus: Boolean = true
-)
+) {
+    val contentText: String
+        get() = contentValue.text
+}
 
+@OptIn(FlowPreview::class)
 class NoteEditorViewModel(application: Application) : AndroidViewModel(application) {
     private val database = VoiceNotesDatabase.getDatabase(application, viewModelScope)
     private val repository = NotesRepository(database.noteDao())
@@ -42,12 +53,13 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
 
     val captureState: StateFlow<AudioCaptureState> = audioCaptureEngine.captureState
     val currentAmplitude: StateFlow<Float> = audioCaptureEngine.currentAmplitude
-    val benchmarkStats = com.example.audio.whisper.InferenceBenchmarkTracker.stats
+    val benchmarkStats = InferenceBenchmarkTracker.stats
 
     private val _uiState = MutableStateFlow(NoteEditorUiState())
     val uiState: StateFlow<NoteEditorUiState> = _uiState.asStateFlow()
 
     private var initialNoteState: NoteEntity? = null
+    private var autoSaveJob: Job? = null
 
     init {
         // Collect emitted audio chunks and run offline Whisper inference pipeline
@@ -60,15 +72,65 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
 
                 val transcriptionResult = whisperInferenceEngine.transcribeChunk(chunk)
                 if (transcriptionResult.text.isNotBlank()) {
-                    _uiState.update { current ->
-                        val separator = if (current.content.isBlank()) "" else "\n"
-                        current.copy(
-                            content = current.content + separator + transcriptionResult.text,
-                            isSavedStatus = false
-                        )
-                    }
+                    appendTranscribedText(transcriptionResult.text)
                 }
             }
+        }
+
+        // Automatic background auto-save debounce (800ms after last typing/dictation event)
+        viewModelScope.launch {
+            _uiState
+                .debounce(800L)
+                .distinctUntilChanged { old, new ->
+                    old.title == new.title &&
+                    old.contentText == new.contentText &&
+                    old.color == new.color &&
+                    old.isPinned == new.isPinned &&
+                    old.isSavedStatus == new.isSavedStatus
+                }
+                .collect { state ->
+                    if (state.isLoaded && !state.isSavedStatus) {
+                        performPersist(state)
+                    }
+                }
+        }
+    }
+
+    private fun appendTranscribedText(recognizedText: String) {
+        _uiState.update { current ->
+            val cleanText = recognizedText.trim()
+            if (cleanText.isBlank()) return@update current
+
+            val currentValue = current.contentValue
+            val text = currentValue.text
+            val selection = currentValue.selection
+
+            val newText: String
+            val newCursorPos: Int
+
+            if (selection.start >= 0 && selection.end >= 0 && selection.start < text.length) {
+                // Insert at active user cursor / selection point
+                val prefix = text.substring(0, selection.start)
+                val suffix = text.substring(selection.end)
+                val needLeadingSpace = prefix.isNotEmpty() && !prefix.endsWith(" ") && !prefix.endsWith("\n")
+                val needTrailingSpace = suffix.isNotEmpty() && !suffix.startsWith(" ") && !suffix.startsWith("\n")
+                val formattedSegment = (if (needLeadingSpace) " " else "") + cleanText + (if (needTrailingSpace) " " else "")
+                newText = prefix + formattedSegment + suffix
+                newCursorPos = (prefix + formattedSegment).length
+            } else {
+                // Append cleanly at the end with appropriate sentence spacing
+                val needLeading = if (text.isBlank()) "" else if (text.endsWith("\n") || text.endsWith(" ")) "" else "\n"
+                newText = text + needLeading + cleanText
+                newCursorPos = newText.length
+            }
+
+            current.copy(
+                contentValue = TextFieldValue(
+                    text = newText,
+                    selection = TextRange(newCursorPos)
+                ),
+                isSavedStatus = false
+            )
         }
     }
 
@@ -95,7 +157,7 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
                 it.copy(
                     noteId = null,
                     title = "",
-                    content = "",
+                    contentValue = TextFieldValue(""),
                     color = initialColor,
                     isPinned = false,
                     isLoaded = true,
@@ -119,7 +181,10 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
                         it.copy(
                             noteId = existing.id,
                             title = existing.title,
-                            content = existing.content,
+                            contentValue = TextFieldValue(
+                                text = existing.content,
+                                selection = TextRange(existing.content.length)
+                            ),
                             color = noteColor,
                             isPinned = existing.isPinned,
                             hasAudio = existing.hasAudio,
@@ -143,8 +208,71 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
         _uiState.update { it.copy(title = newTitle, isSavedStatus = false) }
     }
 
-    fun onContentChanged(newContent: String) {
-        _uiState.update { it.copy(content = newContent, isSavedStatus = false) }
+    fun onContentValueChanged(newValue: TextFieldValue) {
+        _uiState.update { it.copy(contentValue = newValue, isSavedStatus = false) }
+    }
+
+    fun insertTextAtCursor(prefixText: String, suffixText: String = "") {
+        _uiState.update { current ->
+            val currentValue = current.contentValue
+            val text = currentValue.text
+            val selection = currentValue.selection
+
+            val start = selection.min.coerceIn(0, text.length)
+            val end = selection.max.coerceIn(0, text.length)
+
+            val selectedText = if (start < end) text.substring(start, end) else ""
+            val replacement = prefixText + selectedText + suffixText
+
+            val newText = text.substring(0, start) + replacement + text.substring(end)
+            val newCursor = start + replacement.length
+
+            current.copy(
+                contentValue = TextFieldValue(
+                    text = newText,
+                    selection = TextRange(newCursor)
+                ),
+                isSavedStatus = false
+            )
+        }
+    }
+
+    fun insertFormattedLine(prefix: String) {
+        _uiState.update { current ->
+            val currentValue = current.contentValue
+            val text = currentValue.text
+            val selection = currentValue.selection
+            val cursor = selection.start.coerceIn(0, text.length)
+
+            // Find beginning of the current line
+            val lastNewLine = text.lastIndexOf('\n', (cursor - 1).coerceAtLeast(0))
+            val lineStart = if (lastNewLine == -1) 0 else lastNewLine + 1
+
+            val newText = text.substring(0, lineStart) + prefix + text.substring(lineStart)
+            val newCursor = cursor + prefix.length
+
+            current.copy(
+                contentValue = TextFieldValue(
+                    text = newText,
+                    selection = TextRange(newCursor)
+                ),
+                isSavedStatus = false
+            )
+        }
+    }
+
+    fun insertTimestamp() {
+        val dateStr = java.text.SimpleDateFormat("MMM d, yyyy h:mm a", java.util.Locale.getDefault()).format(java.util.Date())
+        insertTextAtCursor("[$dateStr] ")
+    }
+
+    fun clearContent() {
+        _uiState.update { current ->
+            current.copy(
+                contentValue = TextFieldValue(""),
+                isSavedStatus = false
+            )
+        }
     }
 
     fun onColorSelected(newColor: NoteColor) {
@@ -158,25 +286,24 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
         LogKeeperManager.log(LogTag.UI_Editor, "Editor note pin toggled to: $nextPin")
     }
 
-    fun saveNote(): Boolean {
-        val state = _uiState.value
+    private suspend fun performPersist(state: NoteEditorUiState): Boolean {
         val title = state.title.trim()
-        val content = state.content.trim()
+        val content = state.contentText.trim()
 
-        // If completely empty and new, do not save an empty ghost record
         if (title.isBlank() && content.isBlank()) {
             if (state.noteId != null) {
-                // If existing note was emptied completely, we delete it
-                viewModelScope.launch {
-                    repository.deleteNoteById(state.noteId)
-                }
+                repository.deleteNoteById(state.noteId)
             }
             return false
         }
 
         val effectiveTitle = if (title.isBlank()) {
             if (content.isNotBlank()) {
-                content.lines().firstOrNull()?.take(30) ?: "Untitled Note"
+                val firstMeaningfulLine = content.lines()
+                    .map { it.trim().removePrefix("•").removePrefix("-").removePrefix("[ ]").removePrefix("[x]").trim() }
+                    .firstOrNull { it.isNotBlank() }
+                    ?.take(36) ?: "Untitled Note"
+                firstMeaningfulLine
             } else {
                 "Untitled Note"
             }
@@ -193,21 +320,27 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
             isPinned = state.isPinned,
             isChecklist = false,
             isArchived = false,
-            hasAudio = state.hasAudio,
-            audioPath = state.audioPath,
-            audioDurationMs = state.audioDurationMs,
+            hasAudio = false,
+            audioPath = null,
+            audioDurationMs = 0L,
             createdAt = initialNoteState?.createdAt ?: now,
             updatedAt = now
         )
 
+        if (state.noteId == null || state.noteId == 0L) {
+            val newId = repository.insertNote(entity)
+            _uiState.update { it.copy(noteId = newId, updatedAt = now, isSavedStatus = true) }
+        } else {
+            repository.updateNote(entity)
+            _uiState.update { it.copy(updatedAt = now, isSavedStatus = true) }
+        }
+        return true
+    }
+
+    fun saveNote(): Boolean {
+        val state = _uiState.value
         viewModelScope.launch {
-            if (state.noteId == null || state.noteId == 0L) {
-                val newId = repository.insertNote(entity)
-                _uiState.update { it.copy(noteId = newId, updatedAt = now, isSavedStatus = true) }
-            } else {
-                repository.updateNote(entity)
-                _uiState.update { it.copy(updatedAt = now, isSavedStatus = true) }
-            }
+            performPersist(state)
         }
         return true
     }

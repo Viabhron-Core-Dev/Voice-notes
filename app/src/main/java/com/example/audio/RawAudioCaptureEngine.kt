@@ -144,15 +144,19 @@ class RawAudioCaptureEngine(
                 while (isActive && audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     val readCount = audioRecord?.read(shortBuffer, 0, shortBuffer.size) ?: 0
                     if (readCount > 0) {
-                        // Calculate Root Mean Square (RMS) amplitude for UI waveform
+                        // Calculate Root Mean Square (RMS) amplitude for real-time UI waveform
                         var sumOfSquares = 0.0
                         for (i in 0 until readCount) {
                             val sample = shortBuffer[i]
                             sumOfSquares += (sample * sample).toDouble()
                         }
                         val rms = sqrt(sumOfSquares / readCount).toFloat()
-                        // Normalize 16-bit short peak (32767) to [0.0, 1.0] with sensible sensitivity curve
-                        val normalizedRms = (rms / 32767.0f * 5.0f).coerceIn(0.0f, 1.0f)
+
+                        // Acoustic dB calculation: 20 * log10(rms / 32767)
+                        // Range: -50 dB (quiet room) -> -10 dB (normal speaking voice) -> 0 dB (loud peak)
+                        val db = if (rms > 1.0f) 20.0 * kotlin.math.log10(rms.toDouble() / 32767.0) else -60.0
+                        val normalizedRms = ((db + 50.0) / 40.0).coerceIn(0.0, 1.0).toFloat()
+
                         _currentAmplitude.value = normalizedRms
 
                         // Convert short samples to normalized Float32 [-1.0f, 1.0f]
