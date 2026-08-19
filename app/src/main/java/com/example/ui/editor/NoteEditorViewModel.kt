@@ -194,10 +194,15 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun initialize(noteId: Long?, initialColor: NoteColor = NoteColor.YELLOW) {
-        if (_uiState.value.isLoaded) return
+        val current = _uiState.value
+        // If already loaded with the same non-null existing note, avoid redundant reload
+        if (current.isLoaded && noteId != null && noteId != 0L && current.noteId == noteId) {
+            return
+        }
 
         if (noteId == null || noteId == 0L) {
-            // New Note
+            // New Note: Reset all editor fields to fresh blank note state
+            initialNoteState = null
             _uiState.update {
                 it.copy(
                     noteId = null,
@@ -206,8 +211,13 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
                     color = initialColor,
                     isPinned = false,
                     isLoaded = true,
+                    hasAudio = false,
+                    audioPath = null,
+                    audioDurationMs = 0L,
                     updatedAt = System.currentTimeMillis(),
-                    isSavedStatus = true
+                    isSavedStatus = true,
+                    speechStatus = SpeechRecognitionStatus.IDLE_SILENCE,
+                    lastRecognizedSnippet = ""
                 )
             }
             LogKeeperManager.log(
@@ -216,6 +226,13 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
             )
         } else {
             // Load Existing Note
+            initialNoteState = null
+            _uiState.update {
+                it.copy(
+                    isLoaded = false,
+                    noteId = noteId
+                )
+            }
             viewModelScope.launch {
                 val existing = repository.getNoteById(noteId).firstOrNull()
                 if (existing != null) {
@@ -237,7 +254,9 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
                             audioDurationMs = existing.audioDurationMs,
                             updatedAt = existing.updatedAt,
                             isLoaded = true,
-                            isSavedStatus = true
+                            isSavedStatus = true,
+                            speechStatus = SpeechRecognitionStatus.IDLE_SILENCE,
+                            lastRecognizedSnippet = ""
                         )
                     }
                     LogKeeperManager.log(

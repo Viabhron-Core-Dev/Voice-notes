@@ -21,6 +21,7 @@ class WhisperInferenceEngine(private val context: Context) {
 
     private var activeModel: ModelInfoEntity? = null
     private var isLoaded: Boolean = false
+    private val modelDecoder = WhisperModelDecoder(context)
 
     suspend fun loadModel(model: ModelInfoEntity): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -33,6 +34,7 @@ class WhisperInferenceEngine(private val context: Context) {
 
             val startTime = System.currentTimeMillis()
             activeModel = model
+            modelDecoder.load(model.filePath)
             isLoaded = true
             val loadDuration = System.currentTimeMillis() - startTime
 
@@ -59,11 +61,11 @@ class WhisperInferenceEngine(private val context: Context) {
 
         // 2. Phase 2: Offline Inference & Token Decoding
         val inferStart = System.currentTimeMillis()
-        val recognizedText = if (chunk.rmsAmplitude < 0.005f) {
+        val recognizedText = if (chunk.rmsAmplitude < 0.015f) {
             // Audio below micro-silence threshold (faint room noise)
             ""
         } else {
-            decodeMelToText(mel, chunk)
+            modelDecoder.decode(mel, chunk.rmsAmplitude)
         }
         val inferDuration = System.currentTimeMillis() - inferStart
 
@@ -96,18 +98,10 @@ class WhisperInferenceEngine(private val context: Context) {
         )
     }
 
-    private fun decodeMelToText(mel: MelSpectrogram, chunk: AudioChunk): String {
-        // Formats recognized speech segment directly
-        return if (chunk.rmsAmplitude >= 0.005f) {
-            "Voice note dictation transcribed at ${java.text.SimpleDateFormat("h:mm:ss a", java.util.Locale.getDefault()).format(java.util.Date())}"
-        } else {
-            ""
-        }
-    }
-
     fun release() {
         isLoaded = false
         activeModel = null
+        modelDecoder.release()
         LogKeeperManager.log(LogTag.VoiceEngine, "Whisper inference engine released")
     }
 }
