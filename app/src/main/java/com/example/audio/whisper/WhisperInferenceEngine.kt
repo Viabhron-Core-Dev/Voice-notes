@@ -24,6 +24,10 @@ class WhisperInferenceEngine(private val context: Context) {
     private val modelDecoder = WhisperModelDecoder(context)
 
     suspend fun loadModel(model: ModelInfoEntity): Boolean = withContext(Dispatchers.IO) {
+        if (isLoaded && activeModel?.filePath == model.filePath) {
+            return@withContext true
+        }
+
         try {
             val file = File(model.filePath)
             if (!file.exists() || file.length() == 0L) {
