@@ -46,7 +46,8 @@ data class NoteEditorUiState(
     val updatedAt: Long = System.currentTimeMillis(),
     val isSavedStatus: Boolean = true,
     val speechStatus: SpeechRecognitionStatus = SpeechRecognitionStatus.IDLE_SILENCE,
-    val lastRecognizedSnippet: String = ""
+    val lastRecognizedSnippet: String = "",
+    val userMessage: String? = null
 ) {
     val contentText: String
         get() = contentValue.text
@@ -180,7 +181,25 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun startVoiceRecording(): Boolean {
+        viewModelScope.launch {
+            val activeModel = modelDao.getActiveModel().firstOrNull()
+            if (activeModel == null) {
+                _uiState.update {
+                    it.copy(userMessage = "No Whisper model loaded. Please import a model in the Models tab.")
+                }
+                LogKeeperManager.log(
+                    LogTag.VoiceEngine,
+                    "Voice recording started without an active model. Prompting user to import model."
+                )
+            } else {
+                whisperInferenceEngine.loadModel(activeModel)
+            }
+        }
         return audioCaptureEngine.startCapture()
+    }
+
+    fun clearUserMessage() {
+        _uiState.update { it.copy(userMessage = null) }
     }
 
     fun stopVoiceRecording() {

@@ -123,6 +123,14 @@ fun NoteEditorScreen(
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(uiState.userMessage) {
+        val msg = uiState.userMessage
+        if (!msg.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(msg)
+            viewModel.clearUserMessage()
+        }
+    }
     val captureState by viewModel.captureState.collectAsStateWithLifecycle()
     val currentAmplitude by viewModel.currentAmplitude.collectAsStateWithLifecycle()
     val benchmarkStats by viewModel.benchmarkStats.collectAsStateWithLifecycle()

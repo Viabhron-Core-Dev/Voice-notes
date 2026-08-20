@@ -65,7 +65,7 @@ class WhisperInferenceEngine(private val context: Context) {
             // Audio below micro-silence threshold (faint room noise)
             ""
         } else {
-            modelDecoder.decode(mel, chunk.rmsAmplitude)
+            modelDecoder.decode(chunk.samples, mel, chunk.rmsAmplitude)
         }
         val inferDuration = System.currentTimeMillis() - inferStart
 
