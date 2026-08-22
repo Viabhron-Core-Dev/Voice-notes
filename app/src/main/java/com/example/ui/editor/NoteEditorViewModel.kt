@@ -181,6 +181,16 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun startVoiceRecording(): Boolean {
+        // Automatically move cursor to the end of note content so dictation appends at the bottom
+        _uiState.update { current ->
+            val text = current.contentValue.text
+            current.copy(
+                contentValue = current.contentValue.copy(
+                    selection = TextRange(text.length)
+                )
+            )
+        }
+
         viewModelScope.launch {
             val activeModel = modelDao.getActiveModel().firstOrNull()
             if (activeModel == null) {
