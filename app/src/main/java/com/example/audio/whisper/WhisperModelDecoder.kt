@@ -69,7 +69,7 @@ class WhisperModelDecoder(private val context: Context) {
      * Decodes 16kHz float PCM samples into transcribed text tokens.
      */
     fun decode(samples: FloatArray, mel: MelSpectrogram, rawRms: Float): String {
-        if (rawRms < 0.015f) return ""
+        if (rawRms < 0.04f) return ""
 
         // 1. If native GGML context is active, run native whisper_full JNI
         if (nativeContextHandle != 0L) {

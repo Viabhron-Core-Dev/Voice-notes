@@ -305,8 +305,8 @@ Java_com_example_audio_whisper_WhisperNative_fullTranscribe(
     }
     double rms = std::sqrt(sumSq / numSamples);
 
-    // Filter silence / faint room tone (< 1.5% RMS)
-    if (rms < 0.015 || maxAmp < 0.04) {
+    // Filter silence / room tone / low background noise (< 4% RMS or < 8% peak)
+    if (rms < 0.04 || maxAmp < 0.08) {
         env->ReleaseFloatArrayElements(audioSamples, samples, JNI_ABORT);
         return env->NewStringUTF("");
     }
@@ -314,7 +314,7 @@ Java_com_example_audio_whisper_WhisperNative_fullTranscribe(
     // 2. Compute 80-channel Log-Mel Spectrogram from raw PCM samples
     int n_frames = 0;
     std::vector<float> mel = computeLogMelSpectrogram(ctx, samples, numSamples, n_frames);
-    if (mel.empty() || n_frames < 10) {
+    if (mel.empty() || n_frames < 20) {
         env->ReleaseFloatArrayElements(audioSamples, samples, JNI_ABORT);
         return env->NewStringUTF("");
     }
@@ -328,42 +328,41 @@ Java_com_example_audio_whisper_WhisperNative_fullTranscribe(
             p += mel[m * n_frames + f];
         }
         framePower[f] = p / N_MELS;
-        if (framePower[f] > -2.0f) { // Active speech band
+        if (framePower[f] > -1.5f) { // Active speech band threshold
             activeSpeechFrames++;
         }
     }
 
-    // Discard non-speech transients
-    if (activeSpeechFrames < 4) {
+    // Discard non-speech transients / steady background hiss (speech requires dynamic active formant frames)
+    if (activeSpeechFrames < 12) {
         env->ReleaseFloatArrayElements(audioSamples, samples, JNI_ABORT);
         return env->NewStringUTF("");
     }
 
-    // 4. Decode text segments from vocabulary
-    std::string resultText = "";
-    const std::vector<std::string>& vocab = (ctx->vocabulary.size() > 50) ? ctx->vocabulary : std::vector<std::string>();
-
-    // Find syllable energy transitions
+    // 4. Decode speech segments only when genuine voice transitions are present
     std::vector<int> transitions;
-    for (int f = 1; f < n_frames - 1; ++f) {
-        if (framePower[f] > -1.8f &&
+    for (int f = 2; f < n_frames - 2; ++f) {
+        if (framePower[f] > -1.2f &&
             framePower[f] > framePower[f - 1] &&
+            framePower[f] > framePower[f - 2] &&
             framePower[f] >= framePower[f + 1]) {
-            if (transitions.empty() || (f - transitions.back()) >= 6) {
+            if (transitions.empty() || (f - transitions.back()) >= 8) {
                 transitions.push_back(f);
             }
         }
     }
 
-    // If no prominent peaks, generate evenly spaced utterance slices
-    if (transitions.empty()) {
-        int step = n_frames / 4;
-        for (int f = step / 2; f < n_frames; f += step) {
-            transitions.push_back(f);
-        }
+    // If no distinct voice phoneme transitions detected, it is non-speech ambient noise - return empty
+    if (transitions.empty() || transitions.size() < 2) {
+        env->ReleaseFloatArrayElements(audioSamples, samples, JNI_ABORT);
+        return env->NewStringUTF("");
     }
 
-    size_t numTokens = std::min(transitions.size(), static_cast<size_t>(6));
+    // If genuine speech transitions exist, decode
+    std::string resultText = "";
+    const std::vector<std::string>& vocab = (ctx->vocabulary.size() > 50) ? ctx->vocabulary : std::vector<std::string>();
+
+    size_t numTokens = std::min(transitions.size(), static_cast<size_t>(5));
     for (size_t t = 0; t < numTokens; ++t) {
         int frame = transitions[t];
         // Extract frequency centroid across Mel bins 10-60 (human speech vocal tract)
