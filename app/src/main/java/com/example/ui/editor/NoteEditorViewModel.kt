@@ -5,6 +5,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.audio.AndroidSpeechRecognizerEngine
 import com.example.audio.AudioCaptureState
 import com.example.audio.RawAudioCaptureEngine
 import com.example.audio.whisper.InferenceBenchmarkTracker
@@ -17,6 +18,7 @@ import com.example.data.model.NoteColor
 import com.example.data.repository.NotesRepository
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -59,6 +61,7 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
     private val repository = NotesRepository(database.noteDao())
     private val modelDao = database.modelDao()
     private val audioCaptureEngine = RawAudioCaptureEngine(application, viewModelScope)
+    private val speechRecognizerEngine = AndroidSpeechRecognizerEngine(application)
     private val whisperInferenceEngine = WhisperInferenceEngine(application)
 
     val captureState: StateFlow<AudioCaptureState> = audioCaptureEngine.captureState
@@ -80,6 +83,28 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
                         _uiState.update { it.copy(speechStatus = SpeechRecognitionStatus.HEARING_SOUND) }
                     } else {
                         _uiState.update { it.copy(speechStatus = SpeechRecognitionStatus.IDLE_SILENCE) }
+                    }
+                }
+            }
+        }
+
+        // Collect exact recognized words from the speech recognizer engine
+        viewModelScope.launch {
+            speechRecognizerEngine.recognizedTextFlow.collect { text ->
+                if (text.isNotBlank()) {
+                    _uiState.update {
+                        it.copy(
+                            speechStatus = SpeechRecognitionStatus.WORDS_RECOGNIZED,
+                            lastRecognizedSnippet = text.trim()
+                        )
+                    }
+                    appendTranscribedText(text)
+
+                    kotlinx.coroutines.delay(1800L)
+                    _uiState.update {
+                        it.copy(
+                            speechStatus = if (currentAmplitude.value > 0.08f) SpeechRecognitionStatus.HEARING_SOUND else SpeechRecognitionStatus.IDLE_SILENCE
+                        )
                     }
                 }
             }
@@ -181,12 +206,18 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun startVoiceRecording(): Boolean {
-        // Automatically move cursor to the end of note content so dictation appends at the bottom
+        // Automatically move cursor to the end of note content on the last line so dictation appends at the bottom
         _uiState.update { current ->
             val text = current.contentValue.text
+            val newText = if (text.isNotBlank() && !text.endsWith("\n")) {
+                "$text\n"
+            } else {
+                text
+            }
             current.copy(
-                contentValue = current.contentValue.copy(
-                    selection = TextRange(text.length)
+                contentValue = TextFieldValue(
+                    text = newText,
+                    selection = TextRange(newText.length)
                 )
             )
         }
@@ -205,6 +236,8 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
                 whisperInferenceEngine.loadModel(activeModel)
             }
         }
+
+        speechRecognizerEngine.startListening()
         return audioCaptureEngine.startCapture()
     }
 
@@ -213,11 +246,13 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun stopVoiceRecording() {
+        speechRecognizerEngine.stopListening()
         audioCaptureEngine.stopCapture()
     }
 
     override fun onCleared() {
         super.onCleared()
+        speechRecognizerEngine.release()
         audioCaptureEngine.release()
         whisperInferenceEngine.release()
     }

@@ -269,7 +269,15 @@ fun NoteEditorScreen(
                             if (captureState is AudioCaptureState.Recording) {
                                 viewModel.stopVoiceRecording()
                             } else {
-                                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                if (androidx.core.content.ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.RECORD_AUDIO
+                                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    viewModel.startVoiceRecording()
+                                } else {
+                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
                             }
                         },
                         modifier = Modifier.testTag("editor_mic_button")
