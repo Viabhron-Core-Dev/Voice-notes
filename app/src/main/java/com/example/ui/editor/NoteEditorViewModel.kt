@@ -167,11 +167,21 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    private fun appendTranscribedText(recognizedText: String) {
-        _uiState.update { current ->
-            val cleanText = recognizedText.trim()
-            if (cleanText.isBlank()) return@update current
+    private var lastAppendedSnippet: String = ""
+    private var lastAppendedTimeMs: Long = 0L
 
+    private fun appendTranscribedText(recognizedText: String) {
+        val cleanText = recognizedText.trim()
+        if (cleanText.isBlank()) return
+
+        val now = System.currentTimeMillis()
+        if (cleanText.equals(lastAppendedSnippet, ignoreCase = true) && (now - lastAppendedTimeMs) < 2000L) {
+            return // Prevent duplicate insertion of identical phrase from parallel engines
+        }
+        lastAppendedSnippet = cleanText
+        lastAppendedTimeMs = now
+
+        _uiState.update { current ->
             val currentValue = current.contentValue
             val text = currentValue.text
             val selection = currentValue.selection

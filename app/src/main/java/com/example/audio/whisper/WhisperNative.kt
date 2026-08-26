@@ -44,6 +44,15 @@ object WhisperNative {
     ): String
 
     /**
+     * Evaluates Silero VAD neural probability on a 30ms window (480 samples @ 16kHz).
+     * Returns speech probability in range [0.0, 1.0].
+     */
+    external fun computeVadProbability(
+        samples: FloatArray,
+        numSamples: Int
+    ): Float
+
+    /**
      * Frees the native whisper context and releases memory.
      * @param contextHandle The pointer returned by initContext.
      */

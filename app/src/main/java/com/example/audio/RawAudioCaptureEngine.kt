@@ -7,6 +7,9 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import androidx.core.content.ContextCompat
+import com.example.audio.buffer.CircularAudioBuffer
+import com.example.audio.vad.SileroVadDetector
+import com.example.audio.vad.VadTransition
 import com.example.data.logkeeper.LogKeeperManager
 import com.example.data.logkeeper.LogTag
 import kotlinx.coroutines.CoroutineScope
@@ -32,29 +35,41 @@ sealed interface AudioCaptureState {
     data class Error(val message: String) : AudioCaptureState
 }
 
+/**
+ * Raw audio capture engine utilizing:
+ * 1. Thread-safe Circular Ring Buffer (FUTO Voice Input method)
+ * 2. Silero Neural VAD analyzing 30ms frames with probability thresholding (> 0.5)
+ * 3. Real-time amplitude stream for smooth glowing UI pulse
+ */
 class RawAudioCaptureEngine(
     private val context: Context,
     private val scope: CoroutineScope
 ) {
     companion object {
-        const val SAMPLE_RATE = 16000 // 16kHz required for Whisper
+        const val SAMPLE_RATE = 16000 // 16kHz required for Whisper & Silero VAD
         const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
-        const val CHUNK_DURATION_SECONDS = 3 // 3-second streaming audio chunks
+        const val CHUNK_DURATION_SECONDS = 3 // Maximum 3-second speech window
         const val SAMPLES_PER_CHUNK = SAMPLE_RATE * CHUNK_DURATION_SECONDS // 48,000 samples
+        const val VAD_FRAME_SIZE = SileroVadDetector.FRAME_SIZE_SAMPLES // 480 samples = 30ms
     }
 
     private var audioRecord: AudioRecord? = null
     private var recordingJob: Job? = null
 
+    // Circular ring buffer (10s audio storage)
+    private val circularBuffer = CircularAudioBuffer(SAMPLE_RATE * 10)
+    // Silero Neural VAD engine
+    private val sileroVad = SileroVadDetector(threshold = 0.5f)
+
     private val _captureState = MutableStateFlow<AudioCaptureState>(AudioCaptureState.Idle)
     val captureState: StateFlow<AudioCaptureState> = _captureState.asStateFlow()
 
-    // Real-time amplitude for visualizer bars (normalized 0.0f to 1.0f)
+    // Real-time amplitude for visualizer bars & glowing pulse (normalized 0.0f to 1.0f)
     private val _currentAmplitude = MutableStateFlow(0.0f)
     val currentAmplitude: StateFlow<Float> = _currentAmplitude.asStateFlow()
 
-    // Shared flow emitting normalized Float32 audio chunks (ready for Whisper inference)
+    // Shared flow emitting normalized Float32 audio chunks (ready for Whisper/Sherpa inference)
     private val _audioChunks = MutableSharedFlow<AudioChunk>(extraBufferCapacity = 16)
     val audioChunks: SharedFlow<AudioChunk> = _audioChunks.asSharedFlow()
 
@@ -89,11 +104,9 @@ class RawAudioCaptureEngine(
             return false
         }
 
-        // Buffer twice the minimum for safe non-blocking reads
         val bufferSize = (minBufferSize * 2).coerceAtLeast(4096)
 
         try {
-            // Prefer standard MIC with software boost for universal compatibility across phone OEMs
             audioRecord = AudioRecord(
                 MediaRecorder.AudioSource.MIC,
                 SAMPLE_RATE,
@@ -114,36 +127,26 @@ class RawAudioCaptureEngine(
             }
 
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                audioRecord?.release()
-                audioRecord = AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                    SAMPLE_RATE,
-                    CHANNEL_CONFIG,
-                    AUDIO_FORMAT,
-                    bufferSize
-                )
-            }
-
-            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
                 val err = "AudioRecord failed to initialize hardware"
                 LogKeeperManager.log(LogTag.VoiceEngine, err)
                 _captureState.value = AudioCaptureState.Error(err)
                 return false
             }
 
-            // Enable hardware AGC (Automatic Gain Control) if supported on device
             try {
                 if (android.media.audiofx.AutomaticGainControl.isAvailable()) {
                     val agc = android.media.audiofx.AutomaticGainControl.create(audioRecord!!.audioSessionId)
                     agc?.enabled = true
-                    LogKeeperManager.log(LogTag.VoiceEngine, "Hardware AutomaticGainControl (AGC) enabled")
                 }
             } catch (ignored: Throwable) {}
+
+            circularBuffer.clear()
+            sileroVad.reset()
 
             audioRecord?.startRecording()
             LogKeeperManager.log(
                 LogTag.VoiceEngine,
-                "AudioRecord started: 16kHz Mono PCM (Buffer: $bufferSize bytes, Chunk: ${CHUNK_DURATION_SECONDS}s)"
+                "AudioRecord started with Silero VAD (30ms frames @ >0.5 prob) + Circular Ring Buffer"
             )
 
             val startTime = System.currentTimeMillis()
@@ -151,9 +154,12 @@ class RawAudioCaptureEngine(
 
             recordingJob = scope.launch(Dispatchers.IO) {
                 val shortBuffer = ShortArray(1024)
-                val chunkAccumulator = FloatArray(SAMPLES_PER_CHUNK)
-                var accumulatedSamples = 0
+                val floatBuffer = FloatArray(1024)
+                val vadFrameBuffer = FloatArray(VAD_FRAME_SIZE)
+                val speechAccumulator = FloatArray(SAMPLES_PER_CHUNK)
+                var speechSamplesCount = 0
                 var chunkId = 1L
+                var speechDetectedInUtterance = false
 
                 _captureState.value = AudioCaptureState.Recording(
                     durationMs = 0L,
@@ -161,50 +167,79 @@ class RawAudioCaptureEngine(
                     totalChunksEmitted = 0
                 )
 
-                // High-sensitivity Digital Pre-Amp Gain multiplier (3.5x boost for quiet/whisper speech)
                 val DIGITAL_PREAMP_GAIN = 3.5f
 
                 while (isActive && audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     val readCount = audioRecord?.read(shortBuffer, 0, shortBuffer.size) ?: 0
                     if (readCount > 0) {
-                        // Calculate Root Mean Square (RMS) amplitude with pre-amp gain
+                        // 1. Calculate RMS amplitude for glowing visual pulse
                         var sumOfSquares = 0.0
                         for (i in 0 until readCount) {
                             val amplified = (shortBuffer[i] * DIGITAL_PREAMP_GAIN).coerceIn(-32768f, 32767f)
                             sumOfSquares += (amplified * amplified).toDouble()
+                            floatBuffer[i] = (amplified / 32768.0f).coerceIn(-1.0f, 1.0f)
                         }
                         val rms = sqrt(sumOfSquares / readCount).toFloat()
-
-                        // High sensitivity acoustic dB range: -65 dB (faint whisper) -> -10 dB (speaking)
                         val db = if (rms > 0.1f) 20.0 * kotlin.math.log10(rms.toDouble() / 32767.0) else -80.0
                         val normalizedRms = ((db + 65.0) / 55.0).coerceIn(0.0, 1.0).toFloat()
 
                         _currentAmplitude.value = normalizedRms
 
-                        // Convert short samples to normalized Float32 [-1.0f, 1.0f] with digital boost
-                        for (i in 0 until readCount) {
-                            val floatSample = ((shortBuffer[i] * DIGITAL_PREAMP_GAIN) / 32768.0f).coerceIn(-1.0f, 1.0f)
-                            chunkAccumulator[accumulatedSamples++] = floatSample
+                        // 2. Write to Circular Ring Buffer
+                        circularBuffer.write(floatBuffer, readCount)
 
-                            // If we reached chunk size (3.0 seconds / 48,000 samples), emit chunk
-                            if (accumulatedSamples >= SAMPLES_PER_CHUNK) {
-                                val chunkSamples = chunkAccumulator.copyOf()
-                                val chunk = AudioChunk(
-                                    id = chunkId++,
-                                    samples = chunkSamples,
-                                    sampleRate = SAMPLE_RATE,
-                                    durationSeconds = CHUNK_DURATION_SECONDS.toFloat(),
-                                    rmsAmplitude = normalizedRms
-                                )
-                                _audioChunks.tryEmit(chunk)
-                                chunkCount++
+                        // 3. Consume 30ms frames from ring buffer for Silero Neural VAD analysis
+                        while (circularBuffer.available() >= VAD_FRAME_SIZE) {
+                            val samplesRead = circularBuffer.read(vadFrameBuffer, VAD_FRAME_SIZE)
+                            if (samplesRead == VAD_FRAME_SIZE) {
+                                val vadResult = sileroVad.processFrame(vadFrameBuffer)
 
-                                LogKeeperManager.log(
-                                    LogTag.VoiceEngine,
-                                    "Captured audio chunk #$chunkCount (48,000 samples / 3.0s | RMS: ${(normalizedRms * 100).toInt()}%)"
-                                )
+                                if (vadResult.isSpeech) {
+                                    speechDetectedInUtterance = true
+                                    // Accumulate speech frame
+                                    for (s in 0 until VAD_FRAME_SIZE) {
+                                        if (speechSamplesCount < SAMPLES_PER_CHUNK) {
+                                            speechAccumulator[speechSamplesCount++] = vadFrameBuffer[s]
+                                        }
+                                    }
 
-                                accumulatedSamples = 0
+                                    // If window reached max 3 seconds (48,000 samples), emit chunk immediately
+                                    if (speechSamplesCount >= SAMPLES_PER_CHUNK) {
+                                        val chunkSamples = speechAccumulator.copyOf()
+                                        val chunk = AudioChunk(
+                                            id = chunkId++,
+                                            samples = chunkSamples,
+                                            sampleRate = SAMPLE_RATE,
+                                            durationSeconds = CHUNK_DURATION_SECONDS.toFloat(),
+                                            rmsAmplitude = normalizedRms
+                                        )
+                                        _audioChunks.tryEmit(chunk)
+                                        chunkCount++
+                                        speechSamplesCount = 0
+                                        speechDetectedInUtterance = false
+                                    }
+                                } else if (vadResult.transition == VadTransition.SPEECH_END && speechDetectedInUtterance) {
+                                    // Speech pause boundary detected by Silero VAD (> 400ms silence)
+                                    if (speechSamplesCount >= (SAMPLE_RATE / 3)) { // At least 330ms of speech
+                                        val chunkSamples = speechAccumulator.copyOfRange(0, speechSamplesCount)
+                                        val durationSec = speechSamplesCount.toFloat() / SAMPLE_RATE
+                                        val chunk = AudioChunk(
+                                            id = chunkId++,
+                                            samples = chunkSamples,
+                                            sampleRate = SAMPLE_RATE,
+                                            durationSeconds = durationSec,
+                                            rmsAmplitude = normalizedRms
+                                        )
+                                        _audioChunks.tryEmit(chunk)
+                                        chunkCount++
+                                        LogKeeperManager.log(
+                                            LogTag.VoiceEngine,
+                                            "Silero VAD emitted utterance chunk #$chunkCount (${speechSamplesCount} samples / ${String.format("%.2f", durationSec)}s)"
+                                        )
+                                    }
+                                    speechSamplesCount = 0
+                                    speechDetectedInUtterance = false
+                                }
                             }
                         }
 
@@ -217,10 +252,10 @@ class RawAudioCaptureEngine(
                     }
                 }
 
-                // If stopped with remaining audio (> 0.5s), emit final partial chunk
-                if (accumulatedSamples >= (SAMPLE_RATE / 2)) {
-                    val partialSamples = chunkAccumulator.copyOfRange(0, accumulatedSamples)
-                    val durationSec = accumulatedSamples.toFloat() / SAMPLE_RATE
+                // If stopped with remaining speech audio, emit final utterance chunk
+                if (speechSamplesCount >= (SAMPLE_RATE / 3)) {
+                    val partialSamples = speechAccumulator.copyOfRange(0, speechSamplesCount)
+                    val durationSec = speechSamplesCount.toFloat() / SAMPLE_RATE
                     val finalChunk = AudioChunk(
                         id = chunkId++,
                         samples = partialSamples,
@@ -230,10 +265,6 @@ class RawAudioCaptureEngine(
                     )
                     _audioChunks.tryEmit(finalChunk)
                     chunkCount++
-                    LogKeeperManager.log(
-                        LogTag.VoiceEngine,
-                        "Captured final partial chunk #$chunkCount ($accumulatedSamples samples / ${String.format("%.1f", durationSec)}s)"
-                    )
                 }
             }
 
@@ -257,6 +288,8 @@ class RawAudioCaptureEngine(
             }
             audioRecord?.release()
             audioRecord = null
+            circularBuffer.clear()
+            sileroVad.reset()
             _currentAmplitude.value = 0.0f
             _captureState.value = AudioCaptureState.Idle
             LogKeeperManager.log(LogTag.VoiceEngine, "Audio capture stopped and resources released")

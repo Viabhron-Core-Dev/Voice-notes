@@ -140,6 +140,11 @@ When exporting a folder or multi-selected notes:
 - **Mini-Phase 2.1: Encrypted Local Database & Auto-Persistence** (Done)
 - **Mini-Phase 2.2: Lined Notebook Paper Editor & Baseline Alignment** (Done)
 - **Mini-Phase 2.3: Note Organization, Archiving & Screen Views (Calendar, Archive, Folders)** (Done)
+- **Phase 3: Whisper Model Manager & Storage Architecture** (Done)
+- **Phase 4: Raw Audio Capture & Stream Chunking Engine** (Done)
+- **Phase 5: Offline Whisper Inference Engine & Real Neural Tensor Graph** (Done)
+- **Phase 6: Voice-First Note Creation & Editor Integration** (Done)
+- **Phase 7: FUTO Core Speech Stack (Silero Neural VAD + Circular Ring Buffer + Dual Backend)** (Done)
 
 ---
 
