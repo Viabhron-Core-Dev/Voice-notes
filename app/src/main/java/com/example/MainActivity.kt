@@ -41,6 +41,7 @@ sealed interface AppScreen {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        LogKeeperManager.initPersistence(applicationContext)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {

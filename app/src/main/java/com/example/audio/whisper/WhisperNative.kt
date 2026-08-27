@@ -13,8 +13,7 @@ object WhisperNative {
         try {
             System.loadLibrary("whisper-jni")
             isLibraryLoaded = true
-        } catch (e: UnsatisfiedLinkError) {
-            Log.w("WhisperNative", "Native whisper-jni library not loaded: ${e.message}")
+        } catch (_: Throwable) {
             isLibraryLoaded = false
         }
     }

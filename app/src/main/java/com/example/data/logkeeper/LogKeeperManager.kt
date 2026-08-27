@@ -1,8 +1,13 @@
 package com.example.data.logkeeper
 
+import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -17,7 +22,7 @@ enum class TimeFilter(val label: String, val hours: Long) {
 
 object LogKeeperManager {
     private val idCounter = AtomicLong(1L)
-    private const val MAX_LOG_ENTRIES = 1000
+    private const val MAX_LOG_ENTRIES = 2000
 
     private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
     private val fullDateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
@@ -28,10 +33,64 @@ object LogKeeperManager {
     private val _isLoggingEnabled = MutableStateFlow(true)
     val isLoggingEnabled: StateFlow<Boolean> = _isLoggingEnabled.asStateFlow()
 
+    private var persistentLogFile: File? = null
+    private val ioScope = CoroutineScope(Dispatchers.IO)
+
     init {
         log(LogTag.System, "LogKeeper initialized")
         log(LogTag.System, "WindowInsets configured (Edge-to-Edge active)")
         log(LogTag.Navigation, "Navigated to: main")
+    }
+
+    /**
+     * Initializes disk persistence so logs survive process restarts and exits.
+     */
+    fun initPersistence(context: Context) {
+        try {
+            val logsDir = File(context.filesDir, "logs").apply { mkdirs() }
+            val file = File(logsDir, "logkeeper_audit.log")
+            persistentLogFile = file
+
+            if (file.exists()) {
+                val loadedEntries = mutableListOf<LogEntry>()
+                file.forEachLine { line ->
+                    val parts = line.split("\t", limit = 5)
+                    if (parts.size == 5) {
+                        try {
+                            val ts = parts[0].toLong()
+                            val tagName = parts[1]
+                            val lvlName = parts[2]
+                            val timeStr = parts[3]
+                            val msg = parts[4]
+
+                            val tag = try { LogTag.valueOf(tagName) } catch (_: Throwable) { LogTag.System }
+                            val lvl = try { LogLevel.valueOf(lvlName) } catch (_: Throwable) { LogLevel.INFO }
+
+                            loadedEntries.add(
+                                LogEntry(
+                                    id = idCounter.getAndIncrement(),
+                                    timestamp = ts,
+                                    formattedTime = timeStr,
+                                    tag = tag,
+                                    message = msg,
+                                    level = lvl
+                                )
+                            )
+                        } catch (_: Throwable) {
+                            // ignore malformed line
+                        }
+                    }
+                }
+
+                if (loadedEntries.isNotEmpty()) {
+                    // Combine loaded persistent entries with initial in-memory logs
+                    val combined = (loadedEntries.reversed() + _logs.value).distinctBy { "${it.timestamp}_${it.message}" }
+                    _logs.value = combined.take(MAX_LOG_ENTRIES)
+                }
+            }
+        } catch (_: Throwable) {
+            // fallback gracefully
+        }
     }
 
     fun setLoggingEnabled(enabled: Boolean) {
@@ -45,10 +104,11 @@ object LogKeeperManager {
         if (!_isLoggingEnabled.value) return
 
         val now = System.currentTimeMillis()
+        val formattedTimeStr = timeFormat.format(Date(now))
         val entry = LogEntry(
             id = idCounter.getAndIncrement(),
             timestamp = now,
-            formattedTime = timeFormat.format(Date(now)),
+            formattedTime = formattedTimeStr,
             tag = tag,
             message = message,
             level = level
@@ -60,6 +120,18 @@ object LogKeeperManager {
             currentList.removeAt(currentList.lastIndex)
         }
         _logs.value = currentList
+
+        // Asynchronously persist to disk
+        persistentLogFile?.let { file ->
+            ioScope.launch {
+                try {
+                    val sanitizedMsg = message.replace("\n", " ").replace("\t", " ")
+                    file.appendText("${now}\t${tag.name}\t${level.name}\t${formattedTimeStr}\t${sanitizedMsg}\n")
+                } catch (_: Throwable) {
+                    // ignore disk write errors
+                }
+            }
+        }
     }
 
     fun getFilteredLogs(filter: TimeFilter): List<LogEntry> {
@@ -92,6 +164,16 @@ object LogKeeperManager {
 
     fun clearLogs() {
         _logs.value = emptyList()
+        persistentLogFile?.let { file ->
+            ioScope.launch {
+                try {
+                    file.writeText("")
+                } catch (_: Throwable) {
+                    // ignore
+                }
+            }
+        }
         log(LogTag.System, "Log buffer cleared")
     }
 }
+

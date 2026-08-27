@@ -65,7 +65,7 @@ class WhisperInferenceEngine(private val context: Context) {
 
         // 2. Phase 2: Offline Inference & Token Decoding
         val inferStart = System.currentTimeMillis()
-        val recognizedText = if (chunk.rmsAmplitude < 0.04f) {
+        val recognizedText = if (chunk.rmsAmplitude < 0.02f) {
             // Audio below silence/ambient room noise threshold
             ""
         } else {

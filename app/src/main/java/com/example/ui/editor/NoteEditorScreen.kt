@@ -86,6 +86,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextLayoutResult
@@ -119,12 +121,23 @@ fun NoteEditorScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
     LaunchedEffect(noteId) {
         viewModel.initialize(noteId, initialColor)
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val captureState by viewModel.captureState.collectAsStateWithLifecycle()
+
+    // Automatically dismiss and suppress software keyboard when voice dictation is active
+    LaunchedEffect(captureState) {
+        if (captureState is AudioCaptureState.Recording) {
+            keyboardController?.hide()
+            focusManager.clearFocus(force = true)
+        }
+    }
 
     LaunchedEffect(uiState.userMessage) {
         val msg = uiState.userMessage
@@ -133,7 +146,6 @@ fun NoteEditorScreen(
             viewModel.clearUserMessage()
         }
     }
-    val captureState by viewModel.captureState.collectAsStateWithLifecycle()
     val currentAmplitude by viewModel.currentAmplitude.collectAsStateWithLifecycle()
     val benchmarkStats by viewModel.benchmarkStats.collectAsStateWithLifecycle()
 
@@ -271,6 +283,8 @@ fun NoteEditorScreen(
                             if (captureState is AudioCaptureState.Recording) {
                                 viewModel.stopVoiceRecording()
                             } else {
+                                keyboardController?.hide()
+                                focusManager.clearFocus(force = true)
                                 if (androidx.core.content.ContextCompat.checkSelfPermission(
                                         context,
                                         Manifest.permission.RECORD_AUDIO
@@ -470,6 +484,7 @@ fun NoteEditorScreen(
             TextEditorView(
                 contentValue = uiState.contentValue,
                 stripeColor = uiState.color.stripeColor,
+                isRecording = captureState is AudioCaptureState.Recording,
                 onContentValueChange = { viewModel.onContentValueChanged(it) }
             )
         }
@@ -708,6 +723,7 @@ fun FormatChip(
 fun TextEditorView(
     contentValue: TextFieldValue,
     stripeColor: Color,
+    isRecording: Boolean = false,
     onContentValueChange: (TextFieldValue) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -774,6 +790,7 @@ fun TextEditorView(
         BasicTextField(
             value = contentValue,
             onValueChange = onContentValueChange,
+            readOnly = isRecording,
             onTextLayout = { layoutResult ->
                 textLayoutResult = layoutResult
             },

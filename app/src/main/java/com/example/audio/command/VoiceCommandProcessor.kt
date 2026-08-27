@@ -61,19 +61,19 @@ object VoiceCommandProcessor {
             return CommandExecutionResult(true, updated, "Undid last entry")
         }
 
-        // 4. Check for Repeat Last Stitch command (e.g. "repeat last stitch 3 times", "repeat last twice", "repeat last")
-        if (matchesRepeatStitch(trimmed, enabledCommands)) {
-            val repeatCount = extractRepeatCount(trimmed)
-            val updated = repeatLastStitch(currentContent, repeatCount)
-            return CommandExecutionResult(true, updated, "Repeated last stitch $repeatCount time(s)")
-        }
-
-        // 5. Check for Repeat Last Group command (e.g. "repeat last group 3 times", "repeat group twice", "repeat last 2 stitches 3 times")
+        // 4. Check for Repeat Last Group command (e.g. "repeat last group 3 times", "repeat group twice", "repeat last 2 stitches 3 times")
         if (matchesRepeatGroup(trimmed, enabledCommands)) {
             val groupSize = extractGroupSize(trimmed)
             val repeatCount = extractRepeatCount(trimmed)
             val updated = repeatLastGroup(currentContent, groupSize, repeatCount)
             return CommandExecutionResult(true, updated, "Repeated last group $repeatCount time(s)")
+        }
+
+        // 5. Check for Repeat Last Stitch command (e.g. "repeat last stitch 3 times", "repeat last twice", "repeat last")
+        if (matchesRepeatStitch(trimmed, enabledCommands)) {
+            val repeatCount = extractRepeatCount(trimmed)
+            val updated = repeatLastStitch(currentContent, repeatCount)
+            return CommandExecutionResult(true, updated, "Repeated last stitch $repeatCount time(s)")
         }
 
         // 6. Check for Asterisk / Star Repeat Marker
@@ -112,19 +112,24 @@ object VoiceCommandProcessor {
     }
 
     private fun matchesRepeatStitch(spoken: String, enabledCommands: List<VoiceCommandEntity>): Boolean {
+        if (spoken.contains("group") || Regex("repeat\\s+last\\s+\\w+\\s+stitch").containsMatchIn(spoken)) return false
         val rulesForType = enabledCommands.filter { it.commandType == "REPEAT_LAST_STITCH" && it.isEnabled }
         if (rulesForType.isEmpty()) return false
 
         val pattern = Regex("^(repeat\\s+(last\\s+)?(stitch|one|that)|repeat\\s+last)(\\s+([a-z0-9]+)(\\s+times?)?)?\$")
-        return pattern.containsMatchIn(spoken) || rulesForType.any { spoken.startsWith(it.triggerPhrase.lowercase()) }
+        return pattern.containsMatchIn(spoken) || rulesForType.any {
+            spoken == it.triggerPhrase.lowercase() || spoken.startsWith("${it.triggerPhrase.lowercase()} ")
+        }
     }
 
     private fun matchesRepeatGroup(spoken: String, enabledCommands: List<VoiceCommandEntity>): Boolean {
         val rulesForType = enabledCommands.filter { it.commandType == "REPEAT_LAST_GROUP" && it.isEnabled }
         if (rulesForType.isEmpty()) return false
 
-        val pattern = Regex("^(repeat\\s+(last\\s+)?group|repeat\\s+last\\s+\\d+\\s+stitches?)(\\s+([a-z0-9]+)(\\s+times?)?)?\$")
-        return pattern.containsMatchIn(spoken) || rulesForType.any { spoken.startsWith(it.triggerPhrase.lowercase()) }
+        val pattern = Regex("^(repeat\\s+(last\\s+)?group|repeat\\s+last\\s+\\w+\\s+stitches?)(\\s+([a-z0-9]+)(\\s+times?)?)?\$")
+        return pattern.containsMatchIn(spoken) || rulesForType.any {
+            spoken == it.triggerPhrase.lowercase() || spoken.startsWith("${it.triggerPhrase.lowercase()} ")
+        }
     }
 
     private fun extractRepeatCount(spoken: String): Int {

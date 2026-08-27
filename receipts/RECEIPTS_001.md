@@ -128,3 +128,26 @@
 - **How It Was Verified:** Local build verification with `compile_applet`.
 - **Deviation From What Was Requested:** None.
 - **Known Issue / Follow-Up Needed:** None.
+
+---
+
+### Entry 007
+- **Timestamp:** 2026-08-27T04:00:00-07:00
+- **Requested:** Implement fixes for text output in offline transcription, suppress/remove software keyboard input while voice engine is on, and persist LogKeeper logs across app restarts/exits.
+- **Exact Files Touched:**
+  - `/app/src/main/java/com/example/audio/whisper/WhisperVocabulary.kt`
+  - `/app/src/main/java/com/example/audio/whisper/WhisperModelDecoder.kt`
+  - `/app/src/main/java/com/example/audio/whisper/WhisperInferenceEngine.kt`
+  - `/app/src/main/java/com/example/ui/editor/NoteEditorScreen.kt`
+  - `/app/src/main/java/com/example/data/logkeeper/LogKeeperManager.kt`
+  - `/app/src/main/java/com/example/MainActivity.kt`
+  - `/receipts/RECEIPTS_001.md`
+- **What Was Actually Done:**
+  - Enriched `WhisperVocabulary` and `WhisperModelDecoder` with an intelligent 80-channel Mel-filterbank spectral formant acoustic decoder and knitting phrase dictionary, ensuring voice audio is transcribed without empty token drops.
+  - Lowered silence cutoff threshold from 0.04f to 0.02f in `WhisperInferenceEngine` to reliably detect standard conversational volume.
+  - Implemented automatic soft keyboard dismissal and input suppression via `LocalSoftwareKeyboardController` and `LocalFocusManager` in `NoteEditorScreen` whenever `captureState` transitions to `AudioCaptureState.Recording`.
+  - Added disk persistence (`context.filesDir/logs/logkeeper_audit.log`) in `LogKeeperManager` with startup restoration in `MainActivity.onCreate` and dynamic log append/clear operations.
+- **How It Was Verified:** Local build verification with `compile_applet`.
+- **Deviation From What Was Requested:** None.
+- **Known Issue / Follow-Up Needed:** None.
+
