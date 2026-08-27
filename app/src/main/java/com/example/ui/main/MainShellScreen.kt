@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
@@ -106,6 +107,7 @@ fun MainShellScreen(
     onOpenLogKeeper: () -> Unit,
     onOpenNoteEditor: (noteId: Long?, initialColor: NoteColor) -> Unit,
     onOpenModelManager: () -> Unit,
+    onOpenWordReplacements: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: NotesViewModel = viewModel()
 ) {
@@ -288,6 +290,18 @@ fun MainShellScreen(
                                 expanded = menuExpanded,
                                 onDismissRequest = { menuExpanded = false }
                             ) {
+                                DropdownMenuItem(
+                                    text = { Text("Word Replacements") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = Color(0xFF6366F1))
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        LogKeeperManager.log(LogTag.Navigation, "Opened Word Replacements via top menu")
+                                        onOpenWordReplacements()
+                                    },
+                                    modifier = Modifier.testTag("menu_item_word_replacements")
+                                )
                                 DropdownMenuItem(
                                     text = { Text("Log Keeper") },
                                     leadingIcon = {

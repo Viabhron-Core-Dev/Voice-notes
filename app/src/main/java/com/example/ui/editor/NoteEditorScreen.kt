@@ -39,6 +39,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.ColorLens
@@ -112,6 +113,7 @@ fun NoteEditorScreen(
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier,
     initialColor: NoteColor = NoteColor.YELLOW,
+    onOpenWordReplacements: (() -> Unit)? = null,
     viewModel: NoteEditorViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -355,6 +357,21 @@ fun NoteEditorScreen(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false }
                         ) {
+                            if (onOpenWordReplacements != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Word Replacements") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = Color(0xFF6366F1))
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.stopVoiceRecording()
+                                        viewModel.saveNote()
+                                        onOpenWordReplacements()
+                                    },
+                                    modifier = Modifier.testTag("menu_item_editor_word_replacements")
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Copy All Text") },
                                 leadingIcon = {

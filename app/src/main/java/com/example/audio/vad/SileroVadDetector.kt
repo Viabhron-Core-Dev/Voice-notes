@@ -9,16 +9,18 @@ import kotlin.math.sqrt
 
 /**
  * Silero Voice Activity Detection (Neural VAD) Engine.
- * Analyzes 30ms audio frames (480 samples @ 16kHz) with neural probability thresholding (> 0.5).
+ * Analyzes 32ms audio frames (512 samples @ 16kHz) with dual neural probability hysteresis
+ * (Speech Start >= 0.50, Speech End <= 0.35 with 500ms continuous silence).
  * Replicates FUTO Voice Input's acoustic silence/speech separation pipeline.
  */
 class SileroVadDetector(
-    private val threshold: Float = 0.5f,
-    private val minSilenceDurationMs: Long = 400L,
-    private val speechPadMs: Long = 60L
+    private val speechStartThreshold: Float = 0.50f,
+    private val speechEndThreshold: Float = 0.35f,
+    private val minSilenceDurationMs: Long = 500L,
+    private val speechPadMs: Long = 200L
 ) {
     companion object {
-        const val FRAME_SIZE_SAMPLES = 480 // 30ms at 16,000 Hz
+        const val FRAME_SIZE_SAMPLES = 512 // 32ms at 16,000 Hz (FUTO/Silero ONNX standard)
         const val SAMPLE_RATE = 16000
     }
 
@@ -30,16 +32,17 @@ class SileroVadDetector(
     private val silenceFramesThreshold = (minSilenceDurationMs * SAMPLE_RATE / (1000 * FRAME_SIZE_SAMPLES)).toInt()
 
     /**
-     * Evaluates a 30ms audio window (480 samples) and computes human speech probability in range [0.0, 1.0].
+     * Evaluates a 32ms audio window (512 samples) and computes human speech probability in range [0.0, 1.0].
      * Uses native neural evaluation when available, falling back to neural energy/spectral filter.
      */
-    fun computeSpeechProbability(frame30ms: FloatArray): Float {
-        if (frame30ms.size < FRAME_SIZE_SAMPLES) return 0.0f
+    fun computeSpeechProbability(frame32ms: FloatArray): Float {
+        val size = frame32ms.size
+        if (size < 256) return 0.0f
 
         // 1. Try native Silero neural forward pass via JNI
         if (WhisperNative.isNativeAvailable()) {
             try {
-                val nativeProb = WhisperNative.computeVadProbability(frame30ms, FRAME_SIZE_SAMPLES)
+                val nativeProb = WhisperNative.computeVadProbability(frame32ms, size)
                 if (nativeProb in 0.0f..1.0f) {
                     return nativeProb
                 }
@@ -52,10 +55,10 @@ class SileroVadDetector(
         var spectralCentroidNumerator = 0.0
         var spectralCentroidDenominator = 0.0
 
-        for (i in 0 until FRAME_SIZE_SAMPLES) {
-            val s = frame30ms[i]
+        for (i in 0 until size) {
+            val s = frame32ms[i]
             sumSq += (s * s)
-            if (i > 0 && ((frame30ms[i] >= 0f && frame30ms[i - 1] < 0f) || (frame30ms[i] < 0f && frame30ms[i - 1] >= 0f))) {
+            if (i > 0 && ((frame32ms[i] >= 0f && frame32ms[i - 1] < 0f) || (frame32ms[i] < 0f && frame32ms[i - 1] >= 0f))) {
                 zeroCrossings++
             }
             val mag = kotlin.math.abs(s)
@@ -63,8 +66,8 @@ class SileroVadDetector(
             spectralCentroidDenominator += mag
         }
 
-        val rms = sqrt(sumSq / FRAME_SIZE_SAMPLES).toFloat()
-        val zcr = zeroCrossings.toFloat() / FRAME_SIZE_SAMPLES
+        val rms = sqrt(sumSq / size).toFloat()
+        val zcr = zeroCrossings.toFloat() / size
         val centroid = if (spectralCentroidDenominator > 1e-6) {
             (spectralCentroidNumerator / spectralCentroidDenominator).toFloat()
         } else {
@@ -73,7 +76,7 @@ class SileroVadDetector(
 
         // Silero neural activation sigmoid: high RMS in speech band (300Hz-3400Hz), moderate ZCR
         val acousticEnergyScore = (rms * 18.0f) - 0.45f
-        val spectralBandScore = if (zcr in 0.02f..0.38f && centroid in 35.0f..380.0f) 0.65f else -0.35f
+        val spectralBandScore = if (zcr in 0.02f..0.38f && centroid in 35.0f..400.0f) 0.65f else -0.35f
 
         // Recurrent cell update: h_t = tanh(W_x * x + W_h * h_{t-1})
         val rawLogit = acousticEnergyScore + spectralBandScore + (hState0[0] * 0.3f)
@@ -86,35 +89,36 @@ class SileroVadDetector(
     }
 
     /**
-     * Process a 30ms frame and return whether speech is currently active.
+     * Process an audio frame with FUTO hysteresis and return whether speech is currently active.
      */
-    fun processFrame(frame30ms: FloatArray): VadResult {
-        val probability = computeSpeechProbability(frame30ms)
-        val isSpeech = probability >= threshold
+    fun processFrame(frame32ms: FloatArray): VadResult {
+        val probability = computeSpeechProbability(frame32ms)
 
         var stateTransition = VadTransition.NONE
 
-        if (isSpeech) {
-            silenceFramesCount = 0
-            if (!isSpeechActive) {
+        if (!isSpeechActive) {
+            if (probability >= speechStartThreshold) {
                 isSpeechActive = true
+                silenceFramesCount = 0
                 stateTransition = VadTransition.SPEECH_START
                 LogKeeperManager.log(LogTag.VoiceEngine, "Silero VAD: Speech onset detected (P=${String.format("%.2f", probability)})")
             }
         } else {
-            if (isSpeechActive) {
+            if (probability < speechEndThreshold) {
                 silenceFramesCount++
                 if (silenceFramesCount >= silenceFramesThreshold) {
                     isSpeechActive = false
                     stateTransition = VadTransition.SPEECH_END
-                    LogKeeperManager.log(LogTag.VoiceEngine, "Silero VAD: Speech offset / pause boundary detected (P=${String.format("%.2f", probability)})")
+                    LogKeeperManager.log(LogTag.VoiceEngine, "Silero VAD: Speech offset / pause boundary detected after ${minSilenceDurationMs}ms (P=${String.format("%.2f", probability)})")
                 }
+            } else {
+                silenceFramesCount = 0
             }
         }
 
         return VadResult(
             probability = probability,
-            isSpeech = isSpeechActive || isSpeech,
+            isSpeech = isSpeechActive,
             transition = stateTransition
         )
     }

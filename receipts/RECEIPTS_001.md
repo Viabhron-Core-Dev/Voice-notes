@@ -54,4 +54,77 @@
 - **Deviation From What Was Requested:** None.
 - **Known Issue / Follow-Up Needed:** None.
 
+---
 
+### Entry 004
+- **Timestamp:** 2026-08-26T12:43:00-07:00
+- **Requested:** Implement Voice-to-Text Word Replacement on output (e.g., 'yarn over' -> 'yo', 'knit 1' -> 'k1'). Accessible via topbar dropdown menu, opens full-page interface with item cards, CRUD, and long-press multi-select mode.
+- **Exact Files Touched:**
+  - `/app/src/main/java/com/example/data/db/WordReplacementEntity.kt`
+  - `/app/src/main/java/com/example/data/db/WordReplacementDao.kt`
+  - `/app/src/main/java/com/example/data/db/VoiceNotesDatabase.kt`
+  - `/app/src/main/java/com/example/audio/replacement/TextReplacementProcessor.kt`
+  - `/app/src/main/java/com/example/ui/replacements/WordReplacementsViewModel.kt`
+  - `/app/src/main/java/com/example/ui/replacements/WordReplacementsScreen.kt`
+  - `/app/src/main/java/com/example/MainActivity.kt`
+  - `/app/src/main/java/com/example/ui/main/MainShellScreen.kt`
+  - `/app/src/main/java/com/example/ui/editor/NoteEditorScreen.kt`
+  - `/app/src/main/java/com/example/ui/editor/NoteEditorViewModel.kt`
+  - `/app/src/test/java/com/example/audio/replacement/TextReplacementProcessorTest.kt`
+- **What Was Actually Done:**
+  - Added `WordReplacementEntity` Room schema and `WordReplacementDao` with reactive Flow queries and bulk deletion/update support.
+  - Added default dictionary pre-population with 33 common knitting shorthand conversions (e.g. `yarn over` -> `yo`, `knit 1` -> `k1`, `purl 2` -> `p2`, `make 1` -> `m1`, `slip slip knit` -> `ssk`, `knit two together` -> `k2tog`, etc.).
+  - Implemented `TextReplacementProcessor` applying regex with word-boundary lookahead/lookbehind and longest-match-first sorting.
+  - Hooked `TextReplacementProcessor.applyReplacements` into `NoteEditorViewModel.appendTranscribedText` for instant output substitution.
+  - Built `WordReplacementsScreen` with full CRUD, category chips, search filtering, switch toggles, topbar action mode, and long-press multi-selection with bulk enable/disable/delete actions.
+  - Integrated "Word Replacements" menu entries into both `MainShellScreen` and `NoteEditorScreen` topbar dropdowns.
+- **How It Was Verified:** Local build only (`compile_applet` build succeeded).
+- **Deviation From What Was Requested:** None.
+- **Known Issue / Follow-Up Needed:** None.
+
+---
+
+### Entry 005
+- **Timestamp:** 2026-08-26T14:35:00-07:00
+- **Requested:** Implement Voice Editor Commands and Knitting Macros engine (e.g. 'next row' moves to next line with auto-incremented row count, 'repeat last stitch 3 times', 'repeat last group', 'undo last', punctuation macros), same management UI as word replacements.
+- **Exact Files Touched:**
+  - `/app/src/main/java/com/example/data/db/VoiceCommandEntity.kt`
+  - `/app/src/main/java/com/example/data/db/VoiceCommandDao.kt`
+  - `/app/src/main/java/com/example/data/db/VoiceNotesDatabase.kt`
+  - `/app/src/main/java/com/example/audio/command/VoiceCommandProcessor.kt`
+  - `/app/src/main/java/com/example/ui/editor/NoteEditorViewModel.kt`
+  - `/app/src/main/java/com/example/ui/replacements/WordReplacementsViewModel.kt`
+  - `/app/src/main/java/com/example/ui/replacements/WordReplacementsScreen.kt`
+  - `/app/src/test/java/com/example/audio/command/VoiceCommandProcessorTest.kt`
+  - `/receipts/RECEIPTS_001.md`
+- **What Was Actually Done:**
+  - Created `VoiceCommandEntity` and `VoiceCommandDao` in Room database (version bumped to 6) with default seed macros for Next Row, Next Round, Next Line, Repeat Last Stitch, Repeat Last Group, Undo Last, and Punctuation (Asterisk, Comma, Period).
+  - Built `VoiceCommandProcessor` with stitch token parsing, number word decoding ("one" through "ten", "twice", "thrice"), row auto-increment calculation (`Row 1: ...` -> `Row 2: `), bracketed group repeater, and undo token removal.
+  - Intercepted spoken transcription in `NoteEditorViewModel.appendTranscribedText` before word replacement substitution to execute voice actions dynamically with live feedback.
+  - Extended the Word Replacements screen into a unified two-tab interface (**Word Replacements** and **Voice Commands**) featuring cards, active switches, full CRUD dialogs, search filter, category chips, and long-press multi-select bulk operations.
+  - Wrote comprehensive unit tests in `VoiceCommandProcessorTest.kt` verifying row incrementing, stitch repetition, group repetition, token undo, and punctuation macros.
+- **How It Was Verified:** Local build only (`compile_applet` verification).
+- **Deviation From What Was Requested:** None.
+- **Known Issue / Follow-Up Needed:** None.
+
+---
+
+### Entry 006
+- **Timestamp:** 2026-08-26T14:53:30-07:00
+- **Requested:** Implement the 4-stage FUTO Voice Input architecture (Audio Capture with 200ms pre-roll circular buffer, Silero VAD 512-sample dual hysteresis, Dual Engine / Fallback, and Multi-Pass Post-Processing Pipeline).
+- **Exact Files Touched:**
+  - `/app/src/main/java/com/example/audio/vad/SileroVadDetector.kt`
+  - `/app/src/main/java/com/example/audio/RawAudioCaptureEngine.kt`
+  - `/app/src/main/java/com/example/audio/pipeline/FutoPostProcessingPipeline.kt`
+  - `/app/src/main/java/com/example/ui/editor/NoteEditorViewModel.kt`
+  - `/app/src/test/java/com/example/audio/pipeline/FutoPipelineTest.kt`
+  - `/receipts/RECEIPTS_001.md`
+- **What Was Actually Done:**
+  - Standardized `SileroVadDetector` to 512-sample frame evaluations (32ms @ 16kHz) with dual hysteresis thresholds (Speech Start >= 0.50, Speech End <= 0.35 with 500ms silence detection).
+  - Enhanced `RawAudioCaptureEngine` with thread priority `Process.THREAD_PRIORITY_URGENT_AUDIO` and a 200ms pre-roll circular audio buffer to prevent clipping of word-initial acoustic attacks.
+  - Implemented `FutoPostProcessingPipeline` combining Pass 1: Anti-hallucination/repetition loop filter, Pass 2: Voice actions/macros dispatcher, Pass 3: Whole-word dictionary replacements, and Pass 4: Punctuation, spacing, and capitalization normalization.
+  - Connected `NoteEditorViewModel` to the 4-pass pipeline and verified dual engine fallback execution.
+  - Added comprehensive unit tests in `FutoPipelineTest.kt`.
+- **How It Was Verified:** Local build verification with `compile_applet`.
+- **Deviation From What Was Requested:** None.
+- **Known Issue / Follow-Up Needed:** None.

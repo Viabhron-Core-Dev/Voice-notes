@@ -8,10 +8,15 @@ import androidx.lifecycle.viewModelScope
 import com.example.audio.AndroidSpeechRecognizerEngine
 import com.example.audio.AudioCaptureState
 import com.example.audio.RawAudioCaptureEngine
+import com.example.audio.pipeline.FutoPostProcessingPipeline
 import com.example.audio.whisper.InferenceBenchmarkTracker
 import com.example.audio.whisper.WhisperInferenceEngine
+import com.example.audio.command.VoiceCommandProcessor
+import com.example.audio.replacement.TextReplacementProcessor
 import com.example.data.db.NoteEntity
+import com.example.data.db.VoiceCommandEntity
 import com.example.data.db.VoiceNotesDatabase
+import com.example.data.db.WordReplacementEntity
 import com.example.data.logkeeper.LogKeeperManager
 import com.example.data.logkeeper.LogTag
 import com.example.data.model.NoteColor
@@ -20,11 +25,13 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -60,9 +67,19 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
     private val database = VoiceNotesDatabase.getDatabase(application, viewModelScope)
     private val repository = NotesRepository(database.noteDao())
     private val modelDao = database.modelDao()
+    private val wordReplacementDao = database.wordReplacementDao()
+    private val voiceCommandDao = database.voiceCommandDao()
     private val audioCaptureEngine = RawAudioCaptureEngine(application, viewModelScope)
     private val speechRecognizerEngine = AndroidSpeechRecognizerEngine(application)
     private val whisperInferenceEngine = WhisperInferenceEngine(application)
+
+    private val enabledReplacements: StateFlow<List<WordReplacementEntity>> =
+        wordReplacementDao.getEnabledReplacementsFlow()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val enabledCommands: StateFlow<List<VoiceCommandEntity>> =
+        voiceCommandDao.getEnabledCommandsFlow()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val captureState: StateFlow<AudioCaptureState> = audioCaptureEngine.captureState
     val currentAmplitude: StateFlow<Float> = audioCaptureEngine.currentAmplitude
@@ -171,15 +188,43 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
     private var lastAppendedTimeMs: Long = 0L
 
     private fun appendTranscribedText(recognizedText: String) {
-        val cleanText = recognizedText.trim()
-        if (cleanText.isBlank()) return
+        val rawClean = recognizedText.trim()
+        if (rawClean.isBlank()) return
 
         val now = System.currentTimeMillis()
-        if (cleanText.equals(lastAppendedSnippet, ignoreCase = true) && (now - lastAppendedTimeMs) < 2000L) {
+        if (rawClean.equals(lastAppendedSnippet, ignoreCase = true) && (now - lastAppendedTimeMs) < 1500L) {
             return // Prevent duplicate insertion of identical phrase from parallel engines
         }
-        lastAppendedSnippet = cleanText
+        lastAppendedSnippet = rawClean
         lastAppendedTimeMs = now
+
+        val currentContent = _uiState.value.contentValue.text
+        val pipelineResult = FutoPostProcessingPipeline.process(
+            rawTranscript = rawClean,
+            currentNoteContent = currentContent,
+            replacementRules = enabledReplacements.value,
+            commandRules = enabledCommands.value
+        )
+
+        if (pipelineResult.isHandledAsCommand && pipelineResult.updatedNoteContent != null) {
+            _uiState.update { current ->
+                val newText = pipelineResult.updatedNoteContent
+                current.copy(
+                    contentValue = TextFieldValue(
+                        text = newText,
+                        selection = TextRange(newText.length)
+                    ),
+                    speechStatus = SpeechRecognitionStatus.WORDS_RECOGNIZED,
+                    lastRecognizedSnippet = pipelineResult.feedbackMessage ?: rawClean,
+                    isSavedStatus = false
+                )
+            }
+            LogKeeperManager.log(LogTag.UI_Editor, "Executed voice command '$rawClean' -> ${pipelineResult.feedbackMessage}")
+            return
+        }
+
+        val formattedSegment = pipelineResult.formattedTextSegment
+        if (formattedSegment.isBlank()) return
 
         _uiState.update { current ->
             val currentValue = current.contentValue
@@ -195,13 +240,13 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
                 val suffix = text.substring(selection.end)
                 val needLeadingSpace = prefix.isNotEmpty() && !prefix.endsWith(" ") && !prefix.endsWith("\n")
                 val needTrailingSpace = suffix.isNotEmpty() && !suffix.startsWith(" ") && !suffix.startsWith("\n")
-                val formattedSegment = (if (needLeadingSpace) " " else "") + cleanText + (if (needTrailingSpace) " " else "")
-                newText = prefix + formattedSegment + suffix
-                newCursorPos = (prefix + formattedSegment).length
+                val inserted = (if (needLeadingSpace) " " else "") + formattedSegment + (if (needTrailingSpace) " " else "")
+                newText = prefix + inserted + suffix
+                newCursorPos = (prefix + inserted).length
             } else {
                 // Append cleanly at the end with appropriate sentence spacing
                 val needLeading = if (text.isBlank()) "" else if (text.endsWith("\n") || text.endsWith(" ")) "" else "\n"
-                newText = text + needLeading + cleanText
+                newText = text + needLeading + formattedSegment
                 newCursorPos = newText.length
             }
 
@@ -210,6 +255,8 @@ class NoteEditorViewModel(application: Application) : AndroidViewModel(applicati
                     text = newText,
                     selection = TextRange(newCursorPos)
                 ),
+                speechStatus = SpeechRecognitionStatus.WORDS_RECOGNIZED,
+                lastRecognizedSnippet = formattedSegment,
                 isSavedStatus = false
             )
         }

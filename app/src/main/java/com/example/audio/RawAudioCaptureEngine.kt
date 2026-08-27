@@ -37,9 +37,10 @@ sealed interface AudioCaptureState {
 
 /**
  * Raw audio capture engine utilizing:
- * 1. Thread-safe Circular Ring Buffer (FUTO Voice Input method)
- * 2. Silero Neural VAD analyzing 30ms frames with probability thresholding (> 0.5)
- * 3. Real-time amplitude stream for smooth glowing UI pulse
+ * 1. Thread-safe Circular Ring Buffer & 200ms Pre-Roll Cache (FUTO Voice Input method)
+ * 2. Silero Neural VAD analyzing 32ms frames (512 samples @ 16kHz) with dual hysteresis
+ * 3. Dedicated urgent audio thread priority (Process.THREAD_PRIORITY_URGENT_AUDIO)
+ * 4. Real-time amplitude stream for smooth glowing UI pulse
  */
 class RawAudioCaptureEngine(
     private val context: Context,
@@ -51,7 +52,8 @@ class RawAudioCaptureEngine(
         const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         const val CHUNK_DURATION_SECONDS = 3 // Maximum 3-second speech window
         const val SAMPLES_PER_CHUNK = SAMPLE_RATE * CHUNK_DURATION_SECONDS // 48,000 samples
-        const val VAD_FRAME_SIZE = SileroVadDetector.FRAME_SIZE_SAMPLES // 480 samples = 30ms
+        const val VAD_FRAME_SIZE = SileroVadDetector.FRAME_SIZE_SAMPLES // 512 samples = 32ms
+        const val PRE_ROLL_SAMPLES = (SAMPLE_RATE * 0.200).toInt() // 200ms pre-roll = 3,200 samples
     }
 
     private var audioRecord: AudioRecord? = null
@@ -60,7 +62,7 @@ class RawAudioCaptureEngine(
     // Circular ring buffer (10s audio storage)
     private val circularBuffer = CircularAudioBuffer(SAMPLE_RATE * 10)
     // Silero Neural VAD engine
-    private val sileroVad = SileroVadDetector(threshold = 0.5f)
+    private val sileroVad = SileroVadDetector()
 
     private val _captureState = MutableStateFlow<AudioCaptureState>(AudioCaptureState.Idle)
     val captureState: StateFlow<AudioCaptureState> = _captureState.asStateFlow()
@@ -153,10 +155,17 @@ class RawAudioCaptureEngine(
             var chunkCount = 0
 
             recordingJob = scope.launch(Dispatchers.IO) {
+                try {
+                    android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
+                } catch (ignored: Throwable) {}
+
                 val shortBuffer = ShortArray(1024)
                 val floatBuffer = FloatArray(1024)
                 val vadFrameBuffer = FloatArray(VAD_FRAME_SIZE)
                 val speechAccumulator = FloatArray(SAMPLES_PER_CHUNK)
+                val preRollBuffer = FloatArray(PRE_ROLL_SAMPLES)
+                var preRollWritePos = 0
+                var preRollFilledCount = 0
                 var speechSamplesCount = 0
                 var chunkId = 1L
                 var speechDetectedInUtterance = false
@@ -188,11 +197,25 @@ class RawAudioCaptureEngine(
                         // 2. Write to Circular Ring Buffer
                         circularBuffer.write(floatBuffer, readCount)
 
-                        // 3. Consume 30ms frames from ring buffer for Silero Neural VAD analysis
+                        // 3. Consume 32ms frames from ring buffer for Silero Neural VAD analysis
                         while (circularBuffer.available() >= VAD_FRAME_SIZE) {
                             val samplesRead = circularBuffer.read(vadFrameBuffer, VAD_FRAME_SIZE)
                             if (samplesRead == VAD_FRAME_SIZE) {
                                 val vadResult = sileroVad.processFrame(vadFrameBuffer)
+
+                                if (vadResult.transition == VadTransition.SPEECH_START) {
+                                    speechDetectedInUtterance = true
+                                    // Prepend the 200ms pre-roll audio ring to preserve word-initial acoustic attacks
+                                    speechSamplesCount = 0
+                                    val availablePreRoll = kotlin.math.min(preRollFilledCount, PRE_ROLL_SAMPLES)
+                                    val startIdx = (preRollWritePos - availablePreRoll + PRE_ROLL_SAMPLES) % PRE_ROLL_SAMPLES
+                                    for (p in 0 until availablePreRoll) {
+                                        val idx = (startIdx + p) % PRE_ROLL_SAMPLES
+                                        if (speechSamplesCount < SAMPLES_PER_CHUNK) {
+                                            speechAccumulator[speechSamplesCount++] = preRollBuffer[idx]
+                                        }
+                                    }
+                                }
 
                                 if (vadResult.isSpeech) {
                                     speechDetectedInUtterance = true
@@ -218,27 +241,38 @@ class RawAudioCaptureEngine(
                                         speechSamplesCount = 0
                                         speechDetectedInUtterance = false
                                     }
-                                } else if (vadResult.transition == VadTransition.SPEECH_END && speechDetectedInUtterance) {
-                                    // Speech pause boundary detected by Silero VAD (> 400ms silence)
-                                    if (speechSamplesCount >= (SAMPLE_RATE / 3)) { // At least 330ms of speech
-                                        val chunkSamples = speechAccumulator.copyOfRange(0, speechSamplesCount)
-                                        val durationSec = speechSamplesCount.toFloat() / SAMPLE_RATE
-                                        val chunk = AudioChunk(
-                                            id = chunkId++,
-                                            samples = chunkSamples,
-                                            sampleRate = SAMPLE_RATE,
-                                            durationSeconds = durationSec,
-                                            rmsAmplitude = normalizedRms
-                                        )
-                                        _audioChunks.tryEmit(chunk)
-                                        chunkCount++
-                                        LogKeeperManager.log(
-                                            LogTag.VoiceEngine,
-                                            "Silero VAD emitted utterance chunk #$chunkCount (${speechSamplesCount} samples / ${String.format("%.2f", durationSec)}s)"
-                                        )
+                                } else {
+                                    // In silence: feed 200ms pre-roll sliding buffer
+                                    for (s in 0 until VAD_FRAME_SIZE) {
+                                        preRollBuffer[preRollWritePos] = vadFrameBuffer[s]
+                                        preRollWritePos = (preRollWritePos + 1) % PRE_ROLL_SAMPLES
+                                        if (preRollFilledCount < PRE_ROLL_SAMPLES) {
+                                            preRollFilledCount++
+                                        }
                                     }
-                                    speechSamplesCount = 0
-                                    speechDetectedInUtterance = false
+
+                                    if (vadResult.transition == VadTransition.SPEECH_END && speechDetectedInUtterance) {
+                                        // Speech pause boundary detected by Silero VAD (>= 500ms silence)
+                                        if (speechSamplesCount >= (SAMPLE_RATE / 4)) { // At least 250ms of speech
+                                            val chunkSamples = speechAccumulator.copyOfRange(0, speechSamplesCount)
+                                            val durationSec = speechSamplesCount.toFloat() / SAMPLE_RATE
+                                            val chunk = AudioChunk(
+                                                id = chunkId++,
+                                                samples = chunkSamples,
+                                                sampleRate = SAMPLE_RATE,
+                                                durationSeconds = durationSec,
+                                                rmsAmplitude = normalizedRms
+                                            )
+                                            _audioChunks.tryEmit(chunk)
+                                            chunkCount++
+                                            LogKeeperManager.log(
+                                                LogTag.VoiceEngine,
+                                                "Silero VAD emitted utterance chunk #$chunkCount (${speechSamplesCount} samples / ${String.format("%.2f", durationSec)}s)"
+                                            )
+                                        }
+                                        speechSamplesCount = 0
+                                        speechDetectedInUtterance = false
+                                    }
                                 }
                             }
                         }

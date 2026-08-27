@@ -24,12 +24,14 @@ import com.example.ui.editor.NoteEditorScreen
 import com.example.ui.logkeeper.LogKeeperScreen
 import com.example.ui.main.MainShellScreen
 import com.example.ui.models.ModelManagerScreen
+import com.example.ui.replacements.WordReplacementsScreen
 import com.example.ui.theme.MyApplicationTheme
 
 sealed interface AppScreen {
     data object Main : AppScreen
     data object LogKeeper : AppScreen
     data object ModelManager : AppScreen
+    data object WordReplacements : AppScreen
     data class Editor(
         val noteId: Long? = null,
         val initialColor: NoteColor = NoteColor.YELLOW
@@ -77,6 +79,9 @@ fun AppNavigationRoot() {
                     },
                     onOpenModelManager = {
                         currentScreen = AppScreen.ModelManager
+                    },
+                    onOpenWordReplacements = {
+                        currentScreen = AppScreen.WordReplacements
                     }
                 )
             }
@@ -84,6 +89,14 @@ fun AppNavigationRoot() {
                 ModelManagerScreen(
                     onNavigateBack = {
                         LogKeeperManager.log(LogTag.Navigation, "Navigated back from ModelManager to main")
+                        currentScreen = AppScreen.Main
+                    }
+                )
+            }
+            is AppScreen.WordReplacements -> {
+                WordReplacementsScreen(
+                    onNavigateBack = {
+                        LogKeeperManager.log(LogTag.Navigation, "Navigated back from WordReplacements to main")
                         currentScreen = AppScreen.Main
                     }
                 )
@@ -103,6 +116,9 @@ fun AppNavigationRoot() {
                     onNavigateBack = {
                         LogKeeperManager.log(LogTag.Navigation, "Navigated back from Editor to main")
                         currentScreen = AppScreen.Main
+                    },
+                    onOpenWordReplacements = {
+                        currentScreen = AppScreen.WordReplacements
                     }
                 )
             }
