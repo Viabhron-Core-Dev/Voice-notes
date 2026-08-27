@@ -31,7 +31,7 @@ data class VoiceCommandEntity(
     val category: String = "Navigation", // Navigation, Repetition, Editing, Punctuation
 
     @ColumnInfo(name = "is_enabled")
-    val isEnabled: Boolean = true,
+    val isEnabled: Boolean = false,
 
     @ColumnInfo(name = "created_at")
     val createdAt: Long = System.currentTimeMillis()

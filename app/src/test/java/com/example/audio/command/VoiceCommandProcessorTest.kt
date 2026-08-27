@@ -14,18 +14,18 @@ class VoiceCommandProcessorTest {
     @Before
     fun setUp() {
         enabledCommands = listOf(
-            VoiceCommandEntity(commandType = "NEXT_ROW", triggerPhrase = "next row", displayName = "Next Row", description = "Next row"),
-            VoiceCommandEntity(commandType = "NEXT_ROW", triggerPhrase = "next round", displayName = "Next Round", description = "Next round"),
-            VoiceCommandEntity(commandType = "NEXT_LINE", triggerPhrase = "next line", displayName = "Next Line", description = "Next line"),
-            VoiceCommandEntity(commandType = "REPEAT_LAST_STITCH", triggerPhrase = "repeat last stitch", displayName = "Repeat Stitch", description = "Repeat stitch"),
-            VoiceCommandEntity(commandType = "REPEAT_LAST_STITCH", triggerPhrase = "repeat last", displayName = "Repeat Last", description = "Repeat last"),
-            VoiceCommandEntity(commandType = "REPEAT_LAST_GROUP", triggerPhrase = "repeat last group", displayName = "Repeat Group", description = "Repeat group"),
-            VoiceCommandEntity(commandType = "REPEAT_LAST_GROUP", triggerPhrase = "repeat group", displayName = "Repeat Group", description = "Repeat group"),
-            VoiceCommandEntity(commandType = "UNDO_LAST", triggerPhrase = "undo last", displayName = "Undo", description = "Undo"),
-            VoiceCommandEntity(commandType = "UNDO_LAST", triggerPhrase = "undo", displayName = "Undo", description = "Undo"),
-            VoiceCommandEntity(commandType = "INSERT_STAR", triggerPhrase = "asterisk", displayName = "Star", description = "Star"),
-            VoiceCommandEntity(commandType = "INSERT_COMMA", triggerPhrase = "comma", displayName = "Comma", description = "Comma"),
-            VoiceCommandEntity(commandType = "INSERT_PERIOD", triggerPhrase = "period", displayName = "Period", description = "Period")
+            VoiceCommandEntity(commandType = "NEXT_ROW", triggerPhrase = "next row", displayName = "Next Row", description = "Next row", isEnabled = true),
+            VoiceCommandEntity(commandType = "NEXT_ROW", triggerPhrase = "next round", displayName = "Next Round", description = "Next round", isEnabled = true),
+            VoiceCommandEntity(commandType = "NEXT_LINE", triggerPhrase = "next line", displayName = "Next Line", description = "Next line", isEnabled = true),
+            VoiceCommandEntity(commandType = "REPEAT_LAST_STITCH", triggerPhrase = "repeat last stitch", displayName = "Repeat Stitch", description = "Repeat stitch", isEnabled = true),
+            VoiceCommandEntity(commandType = "REPEAT_LAST_STITCH", triggerPhrase = "repeat last", displayName = "Repeat Last", description = "Repeat last", isEnabled = true),
+            VoiceCommandEntity(commandType = "REPEAT_LAST_GROUP", triggerPhrase = "repeat last group", displayName = "Repeat Group", description = "Repeat group", isEnabled = true),
+            VoiceCommandEntity(commandType = "REPEAT_LAST_GROUP", triggerPhrase = "repeat group", displayName = "Repeat Group", description = "Repeat group", isEnabled = true),
+            VoiceCommandEntity(commandType = "UNDO_LAST", triggerPhrase = "undo last", displayName = "Undo", description = "Undo", isEnabled = true),
+            VoiceCommandEntity(commandType = "UNDO_LAST", triggerPhrase = "undo", displayName = "Undo", description = "Undo", isEnabled = true),
+            VoiceCommandEntity(commandType = "INSERT_STAR", triggerPhrase = "asterisk", displayName = "Star", description = "Star", isEnabled = true),
+            VoiceCommandEntity(commandType = "INSERT_COMMA", triggerPhrase = "comma", displayName = "Comma", description = "Comma", isEnabled = true),
+            VoiceCommandEntity(commandType = "INSERT_PERIOD", triggerPhrase = "period", displayName = "Period", description = "Period", isEnabled = true)
         )
     }
 

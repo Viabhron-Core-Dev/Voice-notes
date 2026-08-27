@@ -151,3 +151,25 @@
 - **Deviation From What Was Requested:** None.
 - **Known Issue / Follow-Up Needed:** None.
 
+---
+
+### Entry 008
+- **Timestamp:** 2026-08-27T06:33:00-07:00
+- **Requested:** Fix "stock text" issue where recognized speech outputted knitting phrases instead of spoken words, and ensure all word replacement rules and voice commands are disabled (off) by default.
+- **Exact Files Touched:**
+  - `/app/src/main/java/com/example/audio/whisper/WhisperVocabulary.kt`
+  - `/app/src/main/java/com/example/audio/whisper/WhisperModelDecoder.kt`
+  - `/app/src/main/java/com/example/data/db/WordReplacementEntity.kt`
+  - `/app/src/main/java/com/example/data/db/VoiceCommandEntity.kt`
+  - `/app/src/main/java/com/example/data/db/VoiceNotesDatabase.kt`
+  - `/receipts/RECEIPTS_001.md`
+- **What Was Actually Done:**
+  - Neutralized and cleaned `WhisperVocabulary` by removing the hardcoded `speechPhrases` array containing knitting jargon and deleting the pseudo-acoustic hashing lookup method (`lookupAcousticPattern`).
+  - Streamlined `WhisperModelDecoder` to strictly decode via authentic tensor inference (Native GGML / TFLite) rather than falling back to pseudo-acoustic knitting phrases.
+  - Changed default field state of `isEnabled` to `false` in both `WordReplacementEntity` and `VoiceCommandEntity`.
+  - Updated `VoiceNotesDatabase.populateDefaultKnittingReplacements` and `VoiceNotesDatabase.populateDefaultVoiceCommands` so that all seeded starter rules and macro commands are inserted in a disabled (`isEnabled = false`) state upon database creation.
+- **How It Was Verified:** Local compilation verified with `compile_applet` and test suite execution.
+- **Deviation From What Was Requested:** None.
+- **Known Issue / Follow-Up Needed:** None.
+
+

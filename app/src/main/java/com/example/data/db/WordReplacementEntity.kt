@@ -20,7 +20,7 @@ data class WordReplacementEntity(
     val replacementPhrase: String,
 
     @ColumnInfo(name = "is_enabled")
-    val isEnabled: Boolean = true,
+    val isEnabled: Boolean = false,
 
     @ColumnInfo(name = "is_match_case")
     val isMatchCase: Boolean = false,

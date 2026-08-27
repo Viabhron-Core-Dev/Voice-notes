@@ -128,45 +128,6 @@ class WhisperModelDecoder(private val context: Context) {
             }
         }
 
-        // 3. Robust Neural-Mel Acoustic Spectral Token Decoder
-        // Extracts 80-channel filterbank formant energy profiles and maps voiced utterances
-        try {
-            var lowEnergy = 0.0f
-            var midEnergy = 0.0f
-            var highEnergy = 0.0f
-            val nFrames = mel.nFrames.coerceAtLeast(1)
-
-            for (m in 0 until 80) {
-                var bandSum = 0.0f
-                for (t in 0 until nFrames) {
-                    val idx = m * nFrames + t
-                    if (idx < mel.data.size) {
-                        bandSum += kotlin.math.abs(mel.data[idx])
-                    }
-                }
-                when (m) {
-                    in 0..25 -> lowEnergy += bandSum
-                    in 26..55 -> midEnergy += bandSum
-                    else -> highEnergy += bandSum
-                }
-            }
-
-            val decodedPhrase = WhisperVocabulary.lookupAcousticPattern(
-                lowRatio = lowEnergy,
-                midRatio = midEnergy,
-                highRatio = highEnergy,
-                rms = rawRms,
-                nFrames = nFrames
-            )
-
-            if (decodedPhrase.isNotBlank()) {
-                LogKeeperManager.log(LogTag.VoiceEngine, "Whisper Acoustic Decoder output: '$decodedPhrase'")
-                return decodedPhrase
-            }
-        } catch (e: Throwable) {
-            LogKeeperManager.log(LogTag.VoiceEngine, "Acoustic decode error: ${e.message}")
-        }
-
         return ""
     }
 
